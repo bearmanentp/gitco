@@ -2,28 +2,30 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>GitHub 문제 풀이 서비스</title>
+    <title>GitCo</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
     <style>
         body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; }
-        #sidebar { width: 300px; border-right: 1px solid #ccc; padding: 10px; overflow-y: auto; }
+        #sidebar { width: 300px; border-right: 2px solid #333; padding: 15px; background: #f4f4f4; }
         #main { flex: 1; padding: 20px; }
-        textarea { width: 100%; height: 200px; }
+        .problem-btn { display: block; margin: 5px 0; padding: 10px; width: 100%; text-align: left; cursor: pointer; }
+        textarea { width: 100%; height: 300px; font-family: monospace; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <h3>문제 목록 (GitHub)</h3>
-    <input type="text" id="repoInput" placeholder="user/repo" value="yourname/repo">
-    <button onclick="loadRepo()">불러오기</button>
-    <div id="fileList"></div>
+    <h3>문제 목록</h3>
+    <input type="text" id="repoInput" placeholder="사용자/저장소 (예: user/repo)" value="">
+    <button onclick="loadRepo()">저장소 불러오기</button>
+    <div id="fileList" style="margin-top: 15px;"></div>
 </div>
 
 <div id="main">
-    <h2 id="problemTitle">문제를 선택하세요</h2>
+    <h2 id="problemTitle">문제를 선택해주세요</h2>
     <textarea id="codeEditor" placeholder="여기에 파이썬 코드를 작성하세요..."></textarea>
-    <button onclick="runCode()">채점하기</button>
+    <br><br>
+    <button onclick="runCode()">코드 실행 및 채점</button>
     <pre id="result"></pre>
 </div>
 
@@ -36,22 +38,39 @@
         const repo = document.getElementById('repoInput').value;
         const res = await fetch(`https://api.github.com/repos/${repo}/contents/`);
         const files = await res.json();
+
+        // 1. 파일 이름순(01.py, 02.py...) 정렬
+        const sortedFiles = files.filter(f => f.name.endsWith('.py') || f.name.endsWith('.ipynb'))
+                                 .sort((a, b) => a.name.localeCompare(b.name));
+
         const listDiv = document.getElementById('fileList');
         listDiv.innerHTML = '';
-        files.filter(f => f.name.endsWith('.ipynb')).forEach(f => {
-            const btn = document.createElement('div');
-            btn.innerHTML = `<button onclick="loadProblem('${f.download_url}')">${f.name}</button>`;
+        sortedFiles.forEach(f => {
+            const btn = document.createElement('button');
+            btn.className = 'problem-btn';
+            btn.innerText = f.name;
+            btn.onclick = () => loadProblem(f.download_url);
             listDiv.appendChild(btn);
         });
     }
 
     async function loadProblem(url) {
         const res = await fetch(url);
-        const data = await res.json();
-        const firstCell = data.cells.find(c => c.cell_type === 'code');
-        const source = firstCell.source.join('');
-        const match = source.match(/#\s*문제명:\s*(.*)/);
-        document.getElementById('problemTitle').innerText = match ? match[1] : "이름 없음";
+        // .ipynb 처리
+        if (url.endsWith('.ipynb')) {
+            const data = await res.json();
+            const codeCell = data.cells.find(c => c.cell_type === 'code');
+            const source = codeCell ? codeCell.source.join('') : "";
+            setEditorContent(source);
+        } else {
+            const text = await res.text();
+            setEditorContent(text);
+        }
+    }
+
+    function setEditorContent(source) {
+        const match = source.match(/#\s*(?:문제명|Problem Name):\s*(.*)/i);
+        document.getElementById('problemTitle').innerText = match ? match[1].trim() : "문제";
         document.getElementById('codeEditor').value = source;
     }
 
@@ -59,8 +78,9 @@
         const code = document.getElementById('codeEditor').value;
         const resultDiv = document.getElementById('result');
         try {
-            const output = await pyodide.runPythonAsync(code);
-            resultDiv.innerText = "결과: " + (output !== undefined ? output : "실행 완료(출력 없음)");
+            // 결과값 캡처를 위해 sys.stdout 활용 가능
+            let output = await pyodide.runPythonAsync(code);
+            resultDiv.innerText = "실행 결과: " + (output !== undefined ? output : "출력 없음");
         } catch (err) {
             resultDiv.innerText = "에러: " + err;
         }
