@@ -2,94 +2,57 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>GitCo - 코딩 학습</title>
+    <title>GitCo - 자동 채점 시스템</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <style>
-        :root { --bg: #1e1e1e; --text: #d4d4d4; --accent: #007acc; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; margin: 0; }
-        #sidebar { width: 320px; background: #252526; padding: 20px; border-right: 1px solid #333; }
-        #main { flex: 1; padding: 40px; display: flex; flex-direction: column; }
-        textarea { width: 100%; height: 300px; background: #000; color: #fff; border: 1px solid #444; padding: 10px; }
-        button { background: var(--accent); color: white; border: none; padding: 10px 20px; cursor: pointer; margin-top: 10px; }
-        .problem-item { padding: 10px; border-bottom: 1px solid #333; cursor: pointer; }
-        .problem-item:hover { background: #333; }
-    </style>
+    <script src="https://raw.githubusercontent.com/parallax/jsPDF/master/fontconverter/fontconverter.js"></script>
 </head>
 <body>
+    <script>
+        let solvedHistory = []; // 풀이 결과 누적용 배열
 
-<div id="sidebar">
-    <h2>GitCo</h2>
-    <input type="text" id="repoInput" placeholder="user/repo" style="width: 80%;">
-    <button onclick="loadRepo()">Load</button>
-    <div id="fileList"></div>
-</div>
-
-<div id="main">
-    <h1 id="problemTitle">문제를 선택하세요</h1>
-    <textarea id="codeEditor"></textarea>
-    <button onclick="runAndGrade()">채점하기</button>
-    <button onclick="downloadPDF()">결과 PDF 다운로드</button>
-    <pre id="result"></pre>
-</div>
-
-<script>
-    let pyodide, currentProblem = "";
-    async function init() { pyodide = await loadPyodide(); }
-    init();
-
-    async function loadRepo() {
-        const repo = document.getElementById('repoInput').value;
-        const res = await fetch(`https://api.github.com/repos/${repo}/contents/`);
-        const files = await res.json();
-        const listDiv = document.getElementById('fileList');
-        
-        files.filter(f => f.name.endsWith('.py')).sort().forEach(f => {
-            const div = document.createElement('div');
-            div.className = 'problem-item';
-            div.innerText = f.name.replace('.py', '');
-            div.onclick = () => loadProblem(f.download_url, f.name);
-            listDiv.appendChild(div);
-        });
-    }
-
-    async function loadProblem(url, fileName) {
-        const res = await fetch(url);
-        const source = await res.text();
-        // # 문제: 또는 # Quiz: 인식
-        const match = source.match(/#\s*(?:문제|Quiz):\s*(.*)/i);
-        currentProblem = match ? match[1].trim() : fileName;
-        document.getElementById('problemTitle').innerText = currentProblem;
-        document.getElementById('codeEditor').value = source;
-    }
-
-    async function runAndGrade() {
-        const code = document.getElementById('codeEditor').value;
-        const resDiv = document.getElementById('result');
-        
-        // 출력 캡처를 위한 파이썬 코드
-        await pyodide.runPythonAsync(`
-import sys
-from io import StringIO
-sys.stdout = StringIO()
-        `);
-        
-        try {
-            await pyodide.runPythonAsync(code);
-            const output = pyodide.runPython("sys.stdout.getvalue()");
-            resDiv.innerText = "실행 결과:\n" + output;
-        } catch (err) {
-            resDiv.innerText = "Error: " + err;
+        async function runAndGrade(expectedOutput) {
+            const code = document.getElementById('codeEditor').value;
+            const resDiv = document.getElementById('result');
+            
+            // 1. 코드 실행 후 결과 캡처
+            await pyodide.runPythonAsync(`
+                import sys, io
+                sys.stdout = io.StringIO()
+                try:
+                    ${code}
+                    output = sys.stdout.getvalue()
+                except Exception as e:
+                    output = str(e)
+            `);
+            
+            const output = pyodide.runPython("output").trim();
+            const isCorrect = (output === expectedOutput.toString());
+            
+            // 2. 결과 누적
+            const resultRecord = {
+                title: document.getElementById('problemTitle').innerText,
+                output: output,
+                status: isCorrect ? "정답" : "오답"
+            };
+            solvedHistory.push(resultRecord);
+            
+            resDiv.innerText = `결과: ${output} (${resultRecord.status})`;
         }
-    }
 
-    function downloadPDF() {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        doc.text(`GitCo Report: ${currentProblem}`, 10, 10);
-        doc.text(document.getElementById('result').innerText, 10, 20);
-        doc.save("GitCo_Result.pdf");
-    }
-</script>
+        function downloadPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            // PDF 한글 깨짐 해결: 
+            // 1. jsPDF에서 한글 폰트 등록 필요 (doc.addFont)
+            // 2. 혹은 HTML을 캔버스로 변환하여 이미지로 PDF에 삽입하는 방식 권장
+            doc.text("GitCo Learning Report", 10, 10);
+            solvedHistory.forEach((item, index) => {
+                doc.text(`${index+1}. ${item.title}: ${item.status} (Output: ${item.output})`, 10, 20 + (index * 10));
+            });
+            doc.save("GitCo_Report.pdf");
+        }
+    </script>
 </body>
 </html>
