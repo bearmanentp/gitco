@@ -2,57 +2,168 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>GitCo - 자동 채점 시스템</title>
+    <title>GitCo - 동일 작동 채점 플랫폼</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://raw.githubusercontent.com/parallax/jsPDF/master/fontconverter/fontconverter.js"></script>
+    
+    <style>
+        :root {
+            --bg-main: #1e1e1e;
+            --bg-side: #252526;
+            --text-color: #d4d4d4;
+            --accent: #007acc;
+            --success: #4ec9b0;
+            --fail: #f44747;
+        }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg-main); color: var(--text-color); display: flex; height: 100vh; margin: 0; }
+        #sidebar { width: 300px; background: var(--bg-side); padding: 20px; border-right: 1px solid #333; display: flex; flex-direction: column; }
+        #main { flex: 2; padding: 30px; display: flex; flex-direction: column; border-right: 1px solid #333; }
+        #reportSection { flex: 1; padding: 30px; background: #1a1a1a; overflow-y: auto; }
+        
+        input, textarea { background: #2d2d2d; color: #fff; border: 1px solid #444; padding: 10px; font-family: 'Consolas', monospace; }
+        input { margin-bottom: 10px; }
+        textarea { flex: 1; min-height: 300px; resize: none; margin-top: 10px; }
+        
+        button { background: var(--accent); color: white; border: none; padding: 12px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        button:hover { background: #0062a3; }
+        
+        .prob-btn { background: none; border: none; color: var(--text-color); text-align: left; padding: 10px; width: 100%; cursor: pointer; border-bottom: 1px solid #333; }
+        .prob-btn:hover { background: #333; }
+        
+        .report-card { background: #2d2d2d; padding: 15px; margin-bottom: 10px; border-left: 5px solid #666; }
+        .report-card.정답 { border-left-color: var(--success); }
+        .report-card.오답 { border-left-color: var(--fail); }
+    </style>
 </head>
 <body>
-    <script>
-        let solvedHistory = []; // 풀이 결과 누적용 배열
 
-        async function runAndGrade(expectedOutput) {
-            const code = document.getElementById('codeEditor').value;
-            const resDiv = document.getElementById('result');
-            
-            // 1. 코드 실행 후 결과 캡처
-            await pyodide.runPythonAsync(`
-                import sys, io
-                sys.stdout = io.StringIO()
-                try:
-                    ${code}
-                    output = sys.stdout.getvalue()
-                except Exception as e:
-                    output = str(e)
-            `);
-            
-            const output = pyodide.runPython("output").trim();
-            const isCorrect = (output === expectedOutput.toString());
-            
-            // 2. 결과 누적
-            const resultRecord = {
-                title: document.getElementById('problemTitle').innerText,
-                output: output,
-                status: isCorrect ? "정답" : "오답"
-            };
-            solvedHistory.push(resultRecord);
-            
-            resDiv.innerText = `결과: ${output} (${resultRecord.status})`;
+<div id="sidebar">
+    <h2 style="color: var(--accent); margin-top:0;">GitCo</h2>
+    <input type="text" id="repoInput" placeholder="username/repository">
+    <button onclick="loadRepo()">문제 폴더 로드</button>
+    <div id="fileList" style="margin-top: 20px; overflow-y: auto;"></div>
+</div>
+
+<div id="main">
+    <h2 id="problemTitle" style="margin-top:0;">문제를 선택하세요</h2>
+    <textarea id="codeEditor" placeholder="# 코드를 작성하세요..."></textarea>
+    <button onclick="runAndGrade()">제출 및 채점하기</button>
+</div>
+
+<div id="reportSection">
+    <h2 style="margin-top:0;">학습 리포트 누적</h2>
+    <button onclick="downloadPDF()" style="background:#444; width:100%;">리포트 PDF 다운로드</button>
+    <div id="historyContainer" style="margin-top: 20px;"></div>
+</div>
+
+<script>
+    let pyodide;
+    let currentProblemName = "";
+    let originalMasterCode = ""; // 깃허브 원본 정답 코드를 보관할 변수
+
+    // 1. 파이썬 환경 초기화
+    async function init() {
+        pyodide = await loadPyodide();
+        document.getElementById('problemTitle').innerText = "GitCo 엔진 준비 완료. 문제를 선택하세요.";
+    }
+    init();
+
+    // 2. 깃허브 저장소 로드 (01-, 02- 순서 정렬)
+    async function loadRepo() {
+        const repo = document.getElementById('repoInput').value;
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/`);
+        const files = await res.json();
+        const listDiv = document.getElementById('fileList');
+        listDiv.innerHTML = '';
+
+        files.filter(f => f.name.endsWith('.py')).sort((a,b) => a.name.localeCompare(b.name)).forEach(f => {
+            const btn = document.createElement('button');
+            btn.className = 'prob-btn';
+            btn.innerText = f.name.replace('.py', '');
+            btn.onclick = () => loadProblem(f.download_url, f.name);
+            listDiv.appendChild(btn);
+        });
+    }
+
+    // 3. 문제 파일 로드 및 문제명 파싱
+    async function loadProblem(url, fileName) {
+        const res = await fetch(url);
+        originalMasterCode = await res.text(); // 원본 코드를 정답지로 저장
+
+        // 문제명 또는 Quiz: 태그 파싱
+        const match = originalMasterCode.match(/#\s*(?:문제|Quiz):\s*(.*)/i);
+        currentProblemName = match ? match[1].trim() : fileName.replace('.py', '');
+
+        document.getElementById('problemTitle').innerText = currentProblemName;
+        document.getElementById('codeEditor').value = originalMasterCode;
+    }
+
+    // 4. 출력 캡처 헬퍼 함수
+    async function getCodeOutput(code) {
+        await pyodide.runPythonAsync(`
+import sys, io
+sys.stdout = io.StringIO()
+        `);
+        try {
+            await pyodide.runPythonAsync(code);
+            return pyodide.runPython("sys.stdout.getvalue()").trim();
+        } catch (err) {
+            return "에러 발생: " + err.message;
         }
+    }
 
-        function downloadPDF() {
+    // 5. 정답 코드와 학생 제출 코드 실행 결과 대조 (채점)
+    async function runAndGrade() {
+        if(!originalMasterCode) return alert("문제를 먼저 선택하세요.");
+        
+        const studentCode = document.getElementById('codeEditor').value;
+        document.getElementById('problemTitle').innerText = "채점 중...";
+
+        // 백그라운드에서 원본 파일 실행 결과 획득
+        const masterOutput = await getCodeOutput(originalMasterCode);
+        // 에디터에 적힌 학생 코드 실행 결과 획득
+        const studentOutput = await getCodeOutput(studentCode);
+
+        // 출력값 동일성 확인
+        const isSuccess = (masterOutput === studentOutput) && (!studentOutput.startsWith("에러 발생:"));
+
+        document.getElementById('problemTitle').innerText = currentProblemName;
+        addReportToHistory(currentProblemName, studentOutput, masterOutput, isSuccess);
+    }
+
+    // 6. 우측 리포트 영역에 카드 누적 생성
+    function addReportToHistory(title, studentOut, masterOut, isSuccess) {
+        const container = document.getElementById('historyContainer');
+        const card = document.createElement('div');
+        const status = isSuccess ? "정답" : "오답";
+        card.className = `report-card ${status}`;
+        card.innerHTML = `
+            <strong style="color:${isSuccess?'var(--success)':'var(--fail)'}">[${status}] ${title}</strong>
+            <div style="font-size:12px; margin-top:5px; color:#aaa; white-space: pre-wrap;">내 출력:\n${studentOut}</div>
+            <div style="font-size:12px; color:#aaa; white-space: pre-wrap; margin-top:5px;">정답 출력:\n${masterOut}</div>
+        `;
+        container.insertBefore(card, container.firstChild); // 최신 리포트가 위로 오도록 삽입
+    }
+
+    // 7. 한글 깨짐 없는 화면 캡처 방식 PDF 다운로드
+    function downloadPDF() {
+        const element = document.getElementById('historyContainer');
+        if(!element.hasChildNodes()) return alert("누적된 리포트가 없습니다.");
+
+        html2canvas(element, { scale: 2 }).then(canvas => {
+            const imgData = canvas.toDataURL('image/png');
             const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const imgWidth = 190;
+            const imgHeight = canvas.height * imgWidth / canvas.width;
             
-            // PDF 한글 깨짐 해결: 
-            // 1. jsPDF에서 한글 폰트 등록 필요 (doc.addFont)
-            // 2. 혹은 HTML을 캔버스로 변환하여 이미지로 PDF에 삽입하는 방식 권장
-            doc.text("GitCo Learning Report", 10, 10);
-            solvedHistory.forEach((item, index) => {
-                doc.text(`${index+1}. ${item.title}: ${item.status} (Output: ${item.output})`, 10, 20 + (index * 10));
-            });
-            doc.save("GitCo_Report.pdf");
-        }
-    </script>
+            pdf.setFont("helvetica", "bold");
+            pdf.text("GitCo Cumulative Learning Report", 10, 15);
+            pdf.addImage(imgData, 'PNG', 10, 25, imgWidth, imgHeight);
+            pdf.save("GitCo_Learning_Report.pdf");
+        });
+    }
+</script>
 </body>
 </html>
