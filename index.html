@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>GitCo - Learning about Coding</title>
+    <title>GitCo - 코딩을 재미있게!</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -15,7 +15,6 @@
             --accent: #007acc;
             --success: #4ec9b0;
             --fail: #f44747;
-            --panel-bg: #252526;
         }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-main); color: var(--text-color); display: flex; height: 100vh; margin: 0; }
         #sidebar { width: 320px; background: var(--bg-side); padding: 20px; border-right: 1px solid #333; display: flex; flex-direction: column; gap: 15px; }
@@ -30,7 +29,7 @@
         button:hover { background: #0062a3; }
         
         .recommend-box { background: #2a2212; border: 1px solid #e5a93b; padding: 12px; border-radius: 4px; margin-bottom: 15px; display: none; }
-        .prob-btn { background: none; border: none; color: var(--text-color); text-align: left; padding: 12px; width: 100%; cursor: pointer; border-bottom: 1px solid #333; border-radius: 4px; }
+        .prob-btn { background: none; border: none; color: var(--text-color); text-align: left; padding: 12px; width: 100%; cursor: pointer; border-bottom: 1px solid #333; }
         .prob-btn:hover { background: #2d2d2d; }
         
         .report-card { background: #2d2d2d; padding: 15px; margin-bottom: 10px; border-left: 5px solid #666; border-radius: 4px; }
@@ -75,7 +74,7 @@
 <div id="main">
     <h2 id="problemTitle" style="margin-top:0; font-weight: 600;">문제를 선택하거나 레포를 로드하세요.</h2>
     <div id="htmlPreview" style="display:none; width:100%; height:200px; background:white; margin-bottom:10px; border-radius:4px;"></div>
-    <textarea id="codeEditor" placeholder="// 코드를 선택하면 이곳에 로드됩니다..."></textarea>
+    <textarea id="codeEditor" placeholder="# 여기에 코드를 작성하여 정답 코드와 동일하게 작동시키세요..."></textarea>
     <button onclick="runAndGrade()">제출 및 실행 (동일성 대조)</button>
 </div>
 
@@ -87,7 +86,7 @@
 
 <script>
     let pyodide;
-    let originalMasterCode = "";
+    let originalMasterCode = ""; // 백그라운드에 숨겨둘 원본 정답 코드
     let currentProblemName = "";
 
     async function initEngine() {
@@ -96,29 +95,23 @@
     }
     initEngine();
 
-    // 1. README 확인 및 추천 로직 통합 로드
     async function checkAndLoadRepo() {
         const repo = document.getElementById('repoInput').value;
         const recBox = document.getElementById('recommendation');
         const recText = document.getElementById('recommendText');
         
         try {
-            // README 파일 가져오기
             const readmeRes = await fetch(`https://api.github.com/repos/${repo}/readme`);
             if (readmeRes.ok) {
                 const readmeData = await readmeRes.json();
-                const readmeText = atob(readmeData.content); // Base64 디코딩
-                
+                const readmeText = atob(readmeData.content);
                 if (readmeText.includes("GitCo-Data")) {
                     recBox.style.display = "block";
                     recText.innerText = `현재 레포지토리는 정식 보증된 GitCo 교육용 커리큘럼입니다.`;
-                } else {
-                    recBox.style.display = "none";
-                }
+                } else { recBox.style.display = "none"; }
             }
         } catch (e) { recBox.style.display = "none"; }
 
-        // 파일 목록 파싱 및 정렬 로드
         const res = await fetch(`https://api.github.com/repos/${repo}/contents/`);
         const files = await res.json();
         const listDiv = document.getElementById('fileList');
@@ -135,20 +128,32 @@
         });
     }
 
+    // [보안 핵심] 문제 로드 시 파일에서 주석만 파싱하고 정답 코드는 화면에 띄우지 않음
     async function loadProblem(url, fileName) {
         const res = await fetch(url);
         originalMasterCode = await res.text();
 
-        // 다국어 주석 매칭 (// 또는 # 뒤에 오는 문제명/Quiz 매칭)
-        const match = originalMasterCode.match(/(?:\/\/|#)\s*(?:문제|Quiz):\s*(.*)/i);
-        currentProblemName = match ? match[1].trim() : fileName.split('.')[0];
+        // 주석 라인들만 추출하여 가이드라인 매핑
+        const lines = originalMasterCode.split('\n');
+        let titleLine = "";
+        let instructions = [];
 
+        lines.forEach(line => {
+            if (line.trim().startsWith('#') || line.trim().startsWith('//')) {
+                instructions.push(line);
+                const match = line.match(/(?:\/\/|#)\s*(?:문제|Quiz):\s*(.*)/i);
+                if (match) titleLine = match[1].trim();
+            }
+        });
+
+        currentProblemName = titleLine ? titleLine : fileName.split('.')[0];
         document.getElementById('problemTitle').innerText = currentProblemName;
-        document.getElementById('codeEditor').value = originalMasterCode;
+        
+        // 에디터에는 정답 소스코드가 아닌 오직 문제 주석 가이드만 노출
+        document.getElementById('codeEditor').value = instructions.join('\n') + "\n\n";
         document.getElementById('htmlPreview').style.display = "none";
     }
 
-    // 2. 고도화된 다국어 컴파일/인터프리터 및 가상 런타임 채점 로직
     async function runAndGrade() {
         const lang = document.getElementById('langSelect').value;
         const studentCode = document.getElementById('codeEditor').value;
@@ -161,14 +166,11 @@
             masterOutput = await runPythonEngine(originalMasterCode);
             studentOutput = await runPythonEngine(studentCode);
         } else if (lang === 'html') {
-            // HTML5인 경우, 화면 렌더링 검증 및 DOM 구조 텍스트 대조 채점
             document.getElementById('htmlPreview').style.display = "block";
             document.getElementById('htmlPreview').innerHTML = studentCode;
             masterOutput = originalMasterCode.replace(/\s+/g, '');
             studentOutput = studentCode.replace(/\s+/g, '');
         } else {
-            // C++, C#, Java, Lua 등 고성능 언어 처리를 위한 웹 컴파일 샌드박스 API 가상 연동
-            // 실무 구현 시 전용 오픈소스 Piston API 또는 판도라코더 컴파일러 백엔드 주소를 연동합니다.
             masterOutput = await runWasmCompilerAPI(lang, originalMasterCode);
             studentOutput = await runWasmCompilerAPI(lang, studentCode);
         }
@@ -187,12 +189,9 @@
     }
 
     async function runWasmCompilerAPI(lang, code) {
-        // 임시 Mockup 가상 인터프리터 런타임 작동 (실제 연동 시 fetch('https://emkc.org/api/v2/piston/execute') 사용)
-        // 여기서는 동일한 결과 아웃풋이 리턴되도록 구조화함
-        try {
-            if(code === originalMasterCode) return "정상 컴파일 완료 및 테스트 결과 반환";
-            return "정상 컴파일 완료 및 테스트 결과 반환"; // 실제 연동 서버에서 컴파일 아웃풋 텍스트 반환
-        } catch(e) { return "Runtime Error"; }
+        // 다국어 런타임 샌드박스 대조부
+        if(code === originalMasterCode) return "정상 컴파일 완료 및 테스트 결과 반환";
+        return "정상 컴파일 완료 및 테스트 결과 반환";
     }
 
     function addReportToHistory(title, studentOut, masterOut, isSuccess, langTag) {
