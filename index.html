@@ -2,35 +2,39 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>GitCo</title>
+    <title>GitCo - 코딩 학습</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; }
-        #sidebar { width: 300px; border-right: 2px solid #333; padding: 15px; background: #f4f4f4; }
-        #main { flex: 1; padding: 20px; }
-        .problem-btn { display: block; margin: 5px 0; padding: 10px; width: 100%; text-align: left; cursor: pointer; }
-        textarea { width: 100%; height: 300px; font-family: monospace; }
+        :root { --bg: #1e1e1e; --text: #d4d4d4; --accent: #007acc; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; margin: 0; }
+        #sidebar { width: 320px; background: #252526; padding: 20px; border-right: 1px solid #333; }
+        #main { flex: 1; padding: 40px; display: flex; flex-direction: column; }
+        textarea { width: 100%; height: 300px; background: #000; color: #fff; border: 1px solid #444; padding: 10px; }
+        button { background: var(--accent); color: white; border: none; padding: 10px 20px; cursor: pointer; margin-top: 10px; }
+        .problem-item { padding: 10px; border-bottom: 1px solid #333; cursor: pointer; }
+        .problem-item:hover { background: #333; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <h3>문제 목록</h3>
-    <input type="text" id="repoInput" placeholder="사용자/저장소 (예: user/repo)" value="">
-    <button onclick="loadRepo()">저장소 불러오기</button>
-    <div id="fileList" style="margin-top: 15px;"></div>
+    <h2>GitCo</h2>
+    <input type="text" id="repoInput" placeholder="user/repo" style="width: 80%;">
+    <button onclick="loadRepo()">Load</button>
+    <div id="fileList"></div>
 </div>
 
 <div id="main">
-    <h2 id="problemTitle">문제를 선택해주세요</h2>
-    <textarea id="codeEditor" placeholder="여기에 파이썬 코드를 작성하세요..."></textarea>
-    <br><br>
-    <button onclick="runCode()">코드 실행 및 채점</button>
+    <h1 id="problemTitle">문제를 선택하세요</h1>
+    <textarea id="codeEditor"></textarea>
+    <button onclick="runAndGrade()">채점하기</button>
+    <button onclick="downloadPDF()">결과 PDF 다운로드</button>
     <pre id="result"></pre>
 </div>
 
 <script>
-    let pyodide;
+    let pyodide, currentProblem = "";
     async function init() { pyodide = await loadPyodide(); }
     init();
 
@@ -38,52 +42,53 @@
         const repo = document.getElementById('repoInput').value;
         const res = await fetch(`https://api.github.com/repos/${repo}/contents/`);
         const files = await res.json();
-
-        // 1. 파일 이름순(01.py, 02.py...) 정렬
-        const sortedFiles = files.filter(f => f.name.endsWith('.py') || f.name.endsWith('.ipynb'))
-                                 .sort((a, b) => a.name.localeCompare(b.name));
-
         const listDiv = document.getElementById('fileList');
-        listDiv.innerHTML = '';
-        sortedFiles.forEach(f => {
-            const btn = document.createElement('button');
-            btn.className = 'problem-btn';
-            btn.innerText = f.name;
-            btn.onclick = () => loadProblem(f.download_url);
-            listDiv.appendChild(btn);
+        
+        files.filter(f => f.name.endsWith('.py')).sort().forEach(f => {
+            const div = document.createElement('div');
+            div.className = 'problem-item';
+            div.innerText = f.name.replace('.py', '');
+            div.onclick = () => loadProblem(f.download_url, f.name);
+            listDiv.appendChild(div);
         });
     }
 
-    async function loadProblem(url) {
+    async function loadProblem(url, fileName) {
         const res = await fetch(url);
-        // .ipynb 처리
-        if (url.endsWith('.ipynb')) {
-            const data = await res.json();
-            const codeCell = data.cells.find(c => c.cell_type === 'code');
-            const source = codeCell ? codeCell.source.join('') : "";
-            setEditorContent(source);
-        } else {
-            const text = await res.text();
-            setEditorContent(text);
-        }
-    }
-
-    function setEditorContent(source) {
-        const match = source.match(/#\s*(?:문제명|Problem Name):\s*(.*)/i);
-        document.getElementById('problemTitle').innerText = match ? match[1].trim() : "문제";
+        const source = await res.text();
+        // # 문제: 또는 # Quiz: 인식
+        const match = source.match(/#\s*(?:문제|Quiz):\s*(.*)/i);
+        currentProblem = match ? match[1].trim() : fileName;
+        document.getElementById('problemTitle').innerText = currentProblem;
         document.getElementById('codeEditor').value = source;
     }
 
-    async function runCode() {
+    async function runAndGrade() {
         const code = document.getElementById('codeEditor').value;
-        const resultDiv = document.getElementById('result');
+        const resDiv = document.getElementById('result');
+        
+        // 출력 캡처를 위한 파이썬 코드
+        await pyodide.runPythonAsync(`
+import sys
+from io import StringIO
+sys.stdout = StringIO()
+        `);
+        
         try {
-            // 결과값 캡처를 위해 sys.stdout 활용 가능
-            let output = await pyodide.runPythonAsync(code);
-            resultDiv.innerText = "실행 결과: " + (output !== undefined ? output : "출력 없음");
+            await pyodide.runPythonAsync(code);
+            const output = pyodide.runPython("sys.stdout.getvalue()");
+            resDiv.innerText = "실행 결과:\n" + output;
         } catch (err) {
-            resultDiv.innerText = "에러: " + err;
+            resDiv.innerText = "Error: " + err;
         }
+    }
+
+    function downloadPDF() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.text(`GitCo Report: ${currentProblem}`, 10, 10);
+        doc.text(document.getElementById('result').innerText, 10, 20);
+        doc.save("GitCo_Result.pdf");
     }
 </script>
 </body>
