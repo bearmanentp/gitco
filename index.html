@@ -2,144 +2,2793 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>GitCo - 코딩 교육 플랫폼</title>
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitCo - Git-based Coding Study Platform</title>
+
+    <!-- Pyodide (Python in Browser) -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+
+    <!-- Marked.js (Markdown rendering) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- DOMPurify (XSS protection) -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+
+    <!-- Highlight.js (Code Syntax Highlighting) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/languages/python.min.js"></script>
+
     <style>
-        :root { --bg: #0f172a; --glass: rgba(30, 41, 59, 0.7); --accent: #3b82f6; --success: #10b981; --fail: #ef4444; --text: #f8fafc; }
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; flex-direction: column; height: 100vh; }
-        header { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding: 0 20px; display: flex; align-items: center; justify-content: space-between; height: 60px; }
-        .nav-tabs { display: flex; gap: 10px; }
-        .nav-tab { padding: 10px 20px; border-radius: 8px; cursor: pointer; color: #94a3b8; font-weight: 600; border: none; background: transparent; }
-        .nav-tab.active { background: var(--accent); color: white; }
-        .view-container { display: none; flex: 1; padding: 20px; gap: 20px; }
-        .view-container.active { display: flex; }
-        .glass-panel { background: var(--glass); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
-        input, textarea { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 10px; border-radius: 8px; }
-        button { background: var(--accent); color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; }
+        /* ============================================
+           CSS RESET & VARIABLES
+           ============================================ */
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --bg-card: #1c2128;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-orange: #d29922;
+            --accent-purple: #bc8cff;
+            --border-color: #30363d;
+            --shadow: 0 8px 24px rgba(0,0,0,0.3);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* ============================================
+           SCROLLBAR
+           ============================================ */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* ============================================
+           HEADER
+           ============================================ */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0 24px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(12px);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .header-nav {
+            display: flex;
+            gap: 4px;
+        }
+
+        .nav-btn {
+            padding: 8px 20px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: var(--transition);
+        }
+
+        .nav-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-btn.active {
+            background: var(--accent-blue);
+            color: #fff;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* ============================================
+           BUTTONS
+           ============================================ */
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            background: var(--border-color);
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #4393e6;
+        }
+
+        .btn-success {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+            color: #fff;
+        }
+
+        .btn-success:hover {
+            background: #2ea043;
+        }
+
+        .btn-danger {
+            background: var(--accent-red);
+            border-color: var(--accent-red);
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background: #da3633;
+        }
+
+        .btn-sm {
+            padding: 5px 12px;
+            font-size: 12px;
+        }
+
+        .btn-lg {
+            padding: 12px 24px;
+            font-size: 15px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ============================================
+           INPUT / FORM ELEMENTS
+           ============================================ */
+        .input, .textarea, .select {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 14px;
+            border-radius: var(--radius-sm);
+            transition: var(--transition);
+            font-family: inherit;
+        }
+
+        .input:focus, .textarea:focus, .select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+        }
+
+        .textarea {
+            resize: vertical;
+            min-height: 100px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+
+        .select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b949e' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 36px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        /* ============================================
+           CARDS
+           ============================================ */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 24px;
+            transition: var(--transition);
+        }
+
+        .card:hover {
+            border-color: var(--text-muted);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        /* ============================================
+           MAIN LAYOUT
+           ============================================ */
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ============================================
+           SETTINGS MODAL
+           ============================================ */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 32px;
+            width: 90%;
+            max-width: 560px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: var(--shadow);
+            animation: modalIn 0.3s ease;
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-close {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px;
+            line-height: 1;
+        }
+
+        .modal-close:hover { color: var(--text-primary); }
+
+        /* ============================================
+           STUDIO PAGE
+           ============================================ */
+        .studio-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            align-items: start;
+        }
+
+        @media (max-width: 900px) {
+            .studio-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .preview-box {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 20px;
+            min-height: 200px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            color: var(--accent-green);
+            overflow-x: auto;
+        }
+
+        .preview-box .comment {
+            color: var(--text-muted);
+        }
+
+        /* ============================================
+           LMS PAGE
+           ============================================ */
+        .lms-layout {
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 24px;
+            align-items: start;
+        }
+
+        @media (max-width: 1000px) {
+            .lms-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .problem-list {
+            max-height: calc(100vh - 140px);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .problem-item {
+            padding: 14px 16px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .problem-item:hover {
+            border-color: var(--accent-blue);
+            background: var(--bg-tertiary);
+        }
+
+        .problem-item.active {
+            border-color: var(--accent-blue);
+            background: rgba(88, 166, 255, 0.08);
+        }
+
+        .problem-item .num {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .problem-item .info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .problem-item .title {
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .problem-item .score {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .problem-item .badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .badge-solved {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+
+        .badge-unsolved {
+            background: rgba(139, 148, 158, 0.1);
+            color: var(--text-muted);
+        }
+
+        /* Problem Detail Area */
+        .problem-detail {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .problem-description {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 24px;
+        }
+
+        .problem-description h2 {
+            font-size: 22px;
+            margin-bottom: 8px;
+        }
+
+        .problem-description .meta {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .problem-description .body {
+            font-size: 15px;
+            line-height: 1.8;
+            color: var(--text-primary);
+        }
+
+        .problem-description .body img {
+            max-width: 100%;
+            border-radius: var(--radius-sm);
+            margin: 12px 0;
+            border: 1px solid var(--border-color);
+        }
+
+        /* Code Editor Area */
+        .code-area {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .code-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .code-toolbar .lang {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .code-editor {
+            width: 100%;
+            min-height: 280px;
+            padding: 16px;
+            background: var(--bg-primary);
+            border: none;
+            color: var(--text-primary);
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.7;
+            resize: vertical;
+            outline: none;
+            tab-size: 4;
+        }
+
+        /* Output Area */
+        .output-area {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .output-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .output-header .title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .output-content {
+            padding: 16px;
+            min-height: 120px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .output-content.success {
+            color: var(--accent-green);
+        }
+
+        .output-content.error {
+            color: var(--accent-red);
+        }
+
+        .output-content.info {
+            color: var(--accent-blue);
+        }
+
+        /* ============================================
+           STATS DASHBOARD
+           ============================================ */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .stat-card .label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .stat-card.blue .value { color: var(--accent-blue); }
+        .stat-card.green .value { color: var(--accent-green); }
+        .stat-card.orange .value { color: var(--accent-orange); }
+        .stat-card.purple .value { color: var(--accent-purple); }
+
+        /* ============================================
+           TABLE (Records)
+           ============================================ */
+        .table-wrapper {
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th {
+            background: var(--bg-secondary);
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        tr:last-child td { border-bottom: none; }
+
+        tr:hover td { background: var(--bg-tertiary); }
+
+        .result-pass { color: var(--accent-green); font-weight: 600; }
+        .result-fail { color: var(--accent-red); font-weight: 600; }
+
+        /* ============================================
+           LOADING / SPINNER
+           ============================================ */
+        .spinner {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(13,17,23,0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 3000;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .loading-overlay.show {
+            display: flex;
+        }
+
+        .loading-overlay .spinner {
+            width: 40px;
+            height: 40px;
+            border-width: 3px;
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-size: 15px;
+        }
+
+        /* ============================================
+           TOAST NOTIFICATIONS
+           ============================================ */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 24px;
+            z-index: 4000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            padding: 12px 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            box-shadow: var(--shadow);
+            animation: toastIn 0.3s ease, toastOut 0.3s ease 3.7s forwards;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 280px;
+        }
+
+        .toast.success { border-left: 3px solid var(--accent-green); }
+        .toast.error { border-left: 3px solid var(--accent-red); }
+        .toast.info { border-left: 3px solid var(--accent-blue); }
+        .toast.warning { border-left: 3px solid var(--accent-orange); }
+
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(100px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes toastOut {
+            from { opacity: 1; }
+            to { opacity: 0; transform: translateY(-20px); }
+        }
+
+        /* ============================================
+           EMPTY STATE
+           ============================================ */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state .text {
+            font-size: 15px;
+        }
+
+        /* ============================================
+           LOGIN PANEL
+           ============================================ */
+        .login-panel {
+            max-width: 440px;
+            margin: 60px auto;
+        }
+
+        .login-panel .card {
+            padding: 40px;
+        }
+
+        .login-panel h2 {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .login-panel .subtitle {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 20px 0;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border-color);
+        }
+
+        /* ============================================
+           TABS (inside cards)
+           ============================================ */
+        .tab-group {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 16px;
+        }
+
+        .tab-item {
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: var(--transition);
+            background: none;
+            border-top: none;
+            border-left: none;
+            border-right: none;
+        }
+
+        .tab-item:hover {
+            color: var(--text-primary);
+        }
+
+        .tab-item.active {
+            color: var(--accent-blue);
+            border-bottom-color: var(--accent-blue);
+        }
+
+        /* ============================================
+           STUDENT BADGE
+           ============================================ */
+        .user-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: var(--bg-tertiary);
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .user-badge .avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        /* ============================================
+           PYODIDE STATUS
+           ============================================ */
+        .pyodide-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-orange);
+        }
+
+        .status-dot.ready {
+            background: var(--accent-green);
+        }
+
+        /* ============================================
+           RESPONSIVE
+           ============================================ */
+        @media (max-width: 768px) {
+            .header {
+                padding: 0 12px;
+                height: 56px;
+            }
+
+            .logo { font-size: 18px; }
+
+            .main-container { padding: 12px; }
+
+            .lms-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .problem-list {
+                max-height: 300px;
+            }
+        }
     </style>
 </head>
+
 <body>
 
-<header>
-    <div style="font-weight: 800; font-size: 20px;">GitCo Integrated</div>
-    <div class="nav-tabs">
-        <button class="nav-tab active" onclick="switchTab('lms')">🎓 학습 모드</button>
-        <button class="nav-tab" onclick="switchTab('studio')">✍️ 문제 만들기</button>
+<!-- ==========================================
+     HEADER
+     ========================================== -->
+<header class="header">
+    <div class="logo">
+        <div class="logo-icon">⚡</div>
+        <span>GitCo</span>
+    </div>
+
+    <nav class="header-nav">
+        <button class="nav-btn active" data-page="lms" onclick="switchPage('lms')">
+            📚 학습 (LMS)
+        </button>
+        <button class="nav-btn" data-page="studio" onclick="switchPage('studio')">
+            🛠️ 출제 (Studio)
+        </button>
+        <button class="nav-btn" data-page="records" onclick="switchPage('records')">
+            📊 기록
+        </button>
+    </nav>
+
+    <div class="header-actions">
+        <div class="pyodide-status">
+            <div class="status-dot" id="pyodideStatusDot"></div>
+            <span id="pyodideStatusText">Python 로딩중...</span>
+        </div>
+
+        <div id="userBadge" class="user-badge" style="display:none;">
+            <div class="avatar" id="userAvatar">?</div>
+            <span id="userName">Guest</span>
+        </div>
+
+        <button class="btn btn-sm" onclick="openModal('settingsModal')">⚙️ 설정</button>
     </div>
 </header>
 
-<div id="view-lms" class="view-container active">
-    <div id="sidebar" class="glass-panel" style="width: 320px;">
-        <input type="text" id="scriptUrl" placeholder="구글 앱스크립트 URL">
-        <input type="text" id="className" placeholder="반 이름">
-        <input type="text" id="studentId" placeholder="아이디">
-        <input type="password" id="studentPw" placeholder="비밀번호">
-        <button onclick="loginSystem()">로그인 / 접속</button>
-        <hr style="width:100%; border: 0.1px solid #334155;">
-        <input type="text" id="repoInput" placeholder="user/repo" value="yourgithub/GitCo-Data">
-        <button onclick="loadCurriculum()" style="background:#475569">레포지토리 불러오기</button>
-        <div id="fileList" style="overflow-y: auto; flex: 1;"></div>
+<!-- ==========================================
+     TOAST CONTAINER
+     ========================================== -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ==========================================
+     LOADING OVERLAY
+     ========================================== -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">처리 중...</div>
+</div>
+
+<!-- ==========================================
+     MAIN CONTENT
+     ========================================== -->
+<div class="main-container">
+
+    <!-- ======================================
+         LMS PAGE (학습 모드)
+         ====================================== -->
+    <div class="page active" id="page-lms">
+
+        <!-- Login Panel (shown when not logged in) -->
+        <div id="loginPanel" class="login-panel">
+            <div class="card">
+                <h2>📚 GitCo 학습 모드</h2>
+                <p class="subtitle">GitHub 레포지토리에서 문제를 불러와 학습합니다</p>
+
+                <div class="form-group">
+                    <label>GitHub 토큰 (PAT)</label>
+                    <input type="password" class="input" id="studentToken"
+                           placeholder="ghp_xxxxxxxxxxxx">
+                    <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                        공개 레포는 토큰 없이도 이용 가능합니다
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>학생 ID (이름 또는 학번)</label>
+                    <input type="text" class="input" id="studentId"
+                           placeholder="예: 홍길동 또는 20240001">
+                </div>
+
+                <div class="form-group">
+                    <label>반 (Class)</label>
+                    <input type="text" class="input" id="studentClass"
+                           placeholder="예: 3학년 2반">
+                </div>
+
+                <div class="form-group">
+                    <label>문제 레포지토리 (owner/repo)</label>
+                    <input type="text" class="input" id="studentRepo"
+                           placeholder="예: teacher/python-problems"
+                           value="">
+                </div>
+
+                <button class="btn btn-primary btn-lg" style="width:100%;margin-top:8px;"
+                        onclick="studentLogin()">
+                    🚀 학습 시작
+                </button>
+
+                <div class="divider">또는</div>
+
+                <button class="btn btn-lg" style="width:100%;"
+                        onclick="guestLogin()">
+                    👤 게스트로 학습하기
+                </button>
+            </div>
+        </div>
+
+        <!-- LMS Main (shown after login) -->
+        <div id="lmsMain" style="display:none;">
+            <div class="lms-layout">
+                <!-- Problem List Sidebar -->
+                <div>
+                    <div class="card" style="padding:16px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                            <span class="card-title">📋 문제 목록</span>
+                            <button class="btn btn-sm" onclick="refreshProblems()">🔄</button>
+                        </div>
+                        <div class="problem-list" id="problemList">
+                            <div class="empty-state">
+                                <div class="icon">📭</div>
+                                <div class="text">문제를 불러오는 중...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Problem Detail + Code Editor -->
+                <div class="problem-detail" id="problemDetail">
+                    <div class="empty-state" style="padding:100px 20px;">
+                        <div class="icon">👈</div>
+                        <div class="text">왼쪽에서 문제를 선택해주세요</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    <div id="main" class="glass-panel" style="flex: 2;">
-        <h2 id="problemTitle">문제를 선택하세요</h2>
-        <div id="problemDescription" class="glass-panel">설명이 여기에 나타납니다.</div>
-        <textarea id="codeEditor" style="flex: 1; font-family: monospace;" placeholder="코드 작성..."></textarea>
-        <button onclick="executeCode()" style="background:var(--success)">제출 및 채점</button>
+
+    <!-- ======================================
+         STUDIO PAGE (출제 모드)
+         ====================================== -->
+    <div class="page" id="page-studio">
+        <div class="card" style="margin-bottom:24px;">
+            <div class="card-header">
+                <span class="card-title">🛠️ 문제 출제 Studio</span>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-sm" onclick="previewProblem()">👁️ 미리보기</button>
+                    <button class="btn btn-sm btn-primary" onclick="generatePyFile()">
+                        📥 .py 파일 다운로드
+                    </button>
+                    <button class="btn btn-sm btn-success" id="btnUploadGitHub"
+                            onclick="uploadToGitHub()">
+                        🐙 GitHub에 업로드
+                    </button>
+                </div>
+            </div>
+
+            <div class="studio-layout">
+                <!-- Input Form -->
+                <div>
+                    <div class="form-group">
+                        <label>문제 제목</label>
+                        <input type="text" class="input" id="studioTitle"
+                               placeholder="예: Hello World 출력하기">
+                    </div>
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group">
+                            <label>배점</label>
+                            <input type="number" class="input" id="studioScore"
+                                   placeholder="10" value="10">
+                        </div>
+                        <div class="form-group">
+                            <label>난이도</label>
+                            <select class="select" id="studioDifficulty">
+                                <option value="쉬움">⭐ 쉬움</option>
+                                <option value="보통" selected>⭐⭐ 보통</option>
+                                <option value="어려움">⭐⭐⭐ 어려움</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>문제 설명 (Markdown 지원)</label>
+                        <textarea class="textarea" id="studioDescription" rows="5"
+                                  placeholder="문제를 설명하세요.&#10;이미지 삽입: [이미지: https://example.com/image.png]"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>입력 예시</label>
+                        <input type="text" class="input" id="studioInputExample"
+                               placeholder="예: 없음 또는 5">
+                    </div>
+
+                    <div class="form-group">
+                        <label>출력 예시</label>
+                        <input type="text" class="input" id="studioOutputExample"
+                               placeholder="예: Hello, World!">
+                    </div>
+
+                    <div class="form-group">
+                        <label>정답 코드 (자동 채점용)</label>
+                        <textarea class="textarea" id="studioAnswerCode" rows="6"
+                                  placeholder="# 학생이 입력한 값에 대해&#10;# 정답 출력을 만드는 코드&#10;print('Hello, World!')"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>테스트 입력 (정답 코드에 전달할 입력값, 줄바꿈으로 구분)</label>
+                        <textarea class="textarea" id="studioTestInput" rows="3"
+                                  placeholder="없으면 비워두세요&#10;여러 줄 입력 가능"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>GitHub 업로드 경로 (파일명)</label>
+                        <input type="text" class="input" id="studioFilename"
+                               placeholder="problems/001_hello.py">
+                    </div>
+                </div>
+
+                <!-- Preview -->
+                <div>
+                    <label>📄 생성된 .py 파일 미리보기</label>
+                    <div class="preview-box" id="studioPreview">
+# 문제 제목과 정보를 입력하면
+# 여기에 .py 파일 미리보기가 표시됩니다
+                    </div>
+
+                    <div style="margin-top:16px;">
+                        <label>🖼️ 문제 설명 미리보기 (Markdown 렌더링)</label>
+                        <div class="card" id="studioMarkdownPreview"
+                             style="min-height:100px;padding:16px;">
+                            <span style="color:var(--text-muted);">문제 설명을 입력하세요</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    <div id="reportSection" class="glass-panel" style="flex: 1;">
-        <h3>학습 리포트</h3>
-        <div id="historyContainer"></div>
+
+    <!-- ======================================
+         RECORDS PAGE (기록 대시보드)
+         ====================================== -->
+    <div class="page" id="page-records">
+        <div class="stats-grid">
+            <div class="stat-card blue">
+                <div class="value" id="statTotalStudents">0</div>
+                <div class="label">참여 학생 수</div>
+            </div>
+            <div class="stat-card green">
+                <div class="value" id="statTotalSubmissions">0</div>
+                <div class="label">총 제출 횟수</div>
+            </div>
+            <div class="stat-card orange">
+                <div class="value" id="statTotalCorrect">0</div>
+                <div class="label">정답 횟수</div>
+            </div>
+            <div class="stat-card purple">
+                <div class="value" id="statAvgScore">0%</div>
+                <div class="label">평균 정답률</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">📊 학습 기록</span>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" class="input" id="recordSearch"
+                           placeholder="학생 ID 검색..."
+                           style="width:200px;padding:6px 12px;font-size:13px;"
+                           oninput="filterRecords()">
+                    <button class="btn btn-sm" onclick="loadRecords()">🔄 새로고침</button>
+                    <button class="btn btn-sm" onclick="exportCSV()">📥 CSV 내보내기</button>
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>시간</th>
+                            <th>학생 ID</th>
+                            <th>반</th>
+                            <th>문제</th>
+                            <th>결과</th>
+                            <th>점수</th>
+                            <th>소스코드</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsBody">
+                        <tr>
+                            <td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">
+                                기록이 없습니다. 설정에서 Google Sheet Apps Script URL을 연결하세요.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 
-<div id="view-studio" class="view-container">
-    <div class="glass-panel" style="flex:1;">
-        <h3>문제 설정</h3>
-        <input type="text" id="s_title" placeholder="문제 제목" oninput="generateCode()">
-        <input type="number" id="s_score" placeholder="배점" oninput="generateCode()">
-        <textarea id="s_desc" placeholder="문제 설명 (이미지 링크는 [이미지: URL]로 삽입)" oninput="generateCode()"></textarea>
-        <textarea id="s_code" placeholder="정답 코드 작성" oninput="generateCode()"></textarea>
-    </div>
-    <div class="glass-panel" style="flex:1;">
-        <h3>코드 생성기</h3>
-        <textarea id="outputCode" style="flex:1;" readonly></textarea>
-        <button onclick="downloadPy()" style="background:var(--success)">.py 파일 다운로드</button>
+<!-- ==========================================
+     SETTINGS MODAL
+     ========================================== -->
+<div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+        <div class="modal-title">
+            ⚙️ GitCo 설정
+            <button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
+        </div>
+
+        <div class="tab-group">
+            <button class="tab-item active" onclick="switchSettingsTab(this, 'settingsGithub')">
+                🐙 GitHub
+            </button>
+            <button class="tab-item" onclick="switchSettingsTab(this, 'settingsSheet')">
+                📊 Google Sheet
+            </button>
+            <button class="tab-item" onclick="switchSettingsTab(this, 'settingsGeneral')">
+                🔧 일반
+            </button>
+        </div>
+
+        <!-- GitHub Settings -->
+        <div id="settingsGithub" class="settings-tab">
+            <div class="form-group">
+                <label>GitHub Personal Access Token (PAT)</label>
+                <input type="password" class="input" id="settingGithubToken"
+                       placeholder="ghp_xxxxxxxxxxxx">
+                <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                    <a href="https://github.com/settings/tokens/new?scopes=repo&description=GitCo"
+                       target="_blank" style="color:var(--accent-blue);">
+                        토큰 생성하기 →
+                    </a>
+                    &nbsp;|&nbsp; 필요한 스코프: repo
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label>기본 문제 Repo (owner/repo)</label>
+                <input type="text" class="input" id="settingGithubRepo"
+                       placeholder="예: myteacher/python-problems">
+            </div>
+
+            <div class="form-group">
+                <label>기본 브랜치</label>
+                <input type="text" class="input" id="settingGithubBranch"
+                       placeholder="main" value="main">
+            </div>
+
+            <button class="btn btn-primary" onclick="testGithubConnection()">
+                🔗 GitHub 연결 테스트
+            </button>
+        </div>
+
+        <!-- Google Sheet Settings -->
+        <div id="settingsSheet" class="settings-tab" style="display:none;">
+            <div class="form-group">
+                <label>Google Apps Script 배포 URL</label>
+                <input type="text" class="input" id="settingSheetUrl"
+                       placeholder="https://script.google.com/macros/s/.../exec">
+                <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                    Apps Script를 Web App으로 배포한 URL을 입력하세요
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label>Google Sheet ID (선택)</label>
+                <input type="text" class="input" id="settingSheetId"
+                       placeholder="스프레드시트 URL에서 /d/뒤의 값">
+            </div>
+
+            <button class="btn btn-primary" onclick="testSheetConnection()">
+                🔗 Sheet 연결 테스트
+            </button>
+
+            <div style="margin-top:20px;padding:16px;background:var(--bg-primary);border-radius:var(--radius-sm);border:1px solid var(--border-color);">
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">
+                    <strong>Apps Script 코드 (아래 코드를 Google Apps Script 에디터에 붙여넣으세요):</strong>
+                </p>
+                <button class="btn btn-sm" onclick="copyAppsScript()">📋 Apps Script 코드 복사</button>
+            </div>
+        </div>
+
+        <!-- General Settings -->
+        <div id="settingsGeneral" class="settings-tab" style="display:none;">
+            <div class="form-group">
+                <label>테마</label>
+                <select class="select" id="settingTheme">
+                    <option value="dark" selected>다크 모드</option>
+                    <option value="light">라이트 모드 (준비중)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>코드 실행 시간 제한 (초)</label>
+                <input type="number" class="input" id="settingTimeout"
+                       placeholder="10" value="10">
+            </div>
+
+            <div class="form-group">
+                <label>자동 채점 시 stdout 비교 방식</label>
+                <select class="select" id="settingGradingMode">
+                    <option value="exact" selected>정확히 일치</option>
+                    <option value="strip">공백 무시 후 비교</option>
+                    <option value="contains">출력 포함 여부</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="margin-top:24px;display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn" onclick="closeModal('settingsModal')">취소</button>
+            <button class="btn btn-primary" onclick="saveSettings()">💾 저장</button>
+        </div>
     </div>
 </div>
 
+<!-- ==========================================
+     CODE VIEW MODAL
+     ========================================== -->
+<div class="modal-overlay" id="codeViewModal">
+    <div class="modal" style="max-width:700px;">
+        <div class="modal-title">
+            📄 제출 코드 보기
+            <button class="modal-close" onclick="closeModal('codeViewModal')">&times;</button>
+        </div>
+        <pre style="background:var(--bg-primary);padding:16px;border-radius:var(--radius-sm);overflow-x:auto;font-size:13px;line-height:1.7;max-height:500px;overflow-y:auto;">
+            <code id="codeViewContent" class="language-python"></code>
+        </pre>
+    </div>
+</div>
+
+
+<!-- ==========================================
+     JAVASCRIPT - MAIN APPLICATION
+     ========================================== -->
 <script>
-    let pyodide;
-    let originalMasterCode = "";
-    let currentProblemName = "";
-    let currentUser = "";
+// ============================================
+// GLOBAL STATE
+// ============================================
+const state = {
+    pyodide: null,
+    pyodideReady: false,
+    settings: {
+        githubToken: '',
+        githubRepo: '',
+        githubBranch: 'main',
+        sheetUrl: '',
+        sheetId: '',
+        timeout: 10,
+        gradingMode: 'strip'
+    },
+    student: {
+        id: '',
+        className: '',
+        token: '',
+        isLoggedIn: false,
+        isGuest: false
+    },
+    problems: [],
+    records: [],
+    currentProblem: null,
+    solved: new Set()
+};
 
-    async function init() { pyodide = await loadPyodide(); }
-    init();
+// ============================================
+// INITIALIZATION
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    loadSettings();
+    initPyodide();
+});
 
-    function switchTab(tabId) {
-        document.querySelectorAll('.view-container').forEach(e => e.classList.remove('active'));
-        document.querySelectorAll('.nav-tab').forEach(e => e.classList.remove('active'));
-        document.getElementById('view-' + tabId).classList.add('active');
-        event.target.classList.add('active');
-    }
-
-    // [LMS] Logic
-    async function loadCurriculum() {
-        const repo = document.getElementById('repoInput').value;
-        const res = await fetch(`https://api.github.com/repos/${repo}/contents/`);
-        const files = await res.json();
-        const listDiv = document.getElementById('fileList');
-        listDiv.innerHTML = '';
-        files.filter(f => f.name.endsWith('.py')).forEach(f => {
-            const btn = document.createElement('button');
-            btn.className = 'prob-btn';
-            btn.style.width = "100%"; btn.style.marginBottom="5px";
-            btn.innerText = f.name;
-            btn.onclick = () => loadProblem(f.download_url, f.name);
-            listDiv.appendChild(btn);
+async function initPyodide() {
+    try {
+        state.pyodide = await loadPyodide({
+            indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/'
         });
+        state.pyodideReady = true;
+
+        document.getElementById('pyodideStatusDot').classList.add('ready');
+        document.getElementById('pyodideStatusText').textContent = 'Python 준비됨';
+
+        toast('Python 실행 환경이 준비되었습니다', 'success');
+    } catch (e) {
+        document.getElementById('pyodideStatusText').textContent = 'Python 로딩 실패';
+        toast('Python 실행 환경 로딩 실패: ' + e.message, 'error');
+    }
+}
+
+// ============================================
+// SETTINGS MANAGEMENT
+// ============================================
+function loadSettings() {
+    const saved = localStorage.getItem('gitco_settings');
+    if (saved) {
+        Object.assign(state.settings, JSON.parse(saved));
+    }
+    // Populate form fields
+    document.getElementById('settingGithubToken').value = state.settings.githubToken || '';
+    document.getElementById('settingGithubRepo').value = state.settings.githubRepo || '';
+    document.getElementById('settingGithubBranch').value = state.settings.githubBranch || 'main';
+    document.getElementById('settingSheetUrl').value = state.settings.sheetUrl || '';
+    document.getElementById('settingSheetId').value = state.settings.sheetId || '';
+    document.getElementById('settingTimeout').value = state.settings.timeout || 10;
+    document.getElementById('settingGradingMode').value = state.settings.gradingMode || 'strip';
+
+    // Populate student login fields
+    document.getElementById('studentRepo').value = state.settings.githubRepo || '';
+
+    // Load solved set
+    const solvedSaved = localStorage.getItem('gitco_solved');
+    if (solvedSaved) {
+        state.solved = new Set(JSON.parse(solvedSaved));
+    }
+}
+
+function saveSettings() {
+    state.settings.githubToken = document.getElementById('settingGithubToken').value.trim();
+    state.settings.githubRepo = document.getElementById('settingGithubRepo').value.trim();
+    state.settings.githubBranch = document.getElementById('settingGithubBranch').value.trim() || 'main';
+    state.settings.sheetUrl = document.getElementById('settingSheetUrl').value.trim();
+    state.settings.sheetId = document.getElementById('settingSheetId').value.trim();
+    state.settings.timeout = parseInt(document.getElementById('settingTimeout').value) || 10;
+    state.settings.gradingMode = document.getElementById('settingGradingMode').value;
+
+    localStorage.setItem('gitco_settings', JSON.stringify(state.settings));
+    closeModal('settingsModal');
+    toast('설정이 저장되었습니다', 'success');
+
+    // Update Studio upload button visibility
+    updateStudioUI();
+}
+
+function updateStudioUI() {
+    const btn = document.getElementById('btnUploadGitHub');
+    if (state.settings.githubToken && state.settings.githubRepo) {
+        btn.style.display = '';
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+// ============================================
+// PAGE NAVIGATION
+// ============================================
+function switchPage(pageName) {
+    // Update nav buttons
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.page === pageName);
+    });
+
+    // Show/hide pages
+    document.querySelectorAll('.page').forEach(page => {
+        page.classList.toggle('active', page.id === 'page-' + pageName);
+    });
+
+    // Load records if switching to records page
+    if (pageName === 'records' && state.settings.sheetUrl) {
+        loadRecords();
+    }
+}
+
+function switchSettingsTab(btn, tabId) {
+    btn.parentElement.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+
+    document.querySelectorAll('.settings-tab').forEach(t => t.style.display = 'none');
+    document.getElementById(tabId).style.display = 'block';
+}
+
+// ============================================
+// MODAL HELPERS
+// ============================================
+function openModal(id) {
+    document.getElementById(id).classList.add('show');
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('show');
+}
+
+// Close modal on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            overlay.classList.remove('show');
+        }
+    });
+});
+
+// ============================================
+// TOAST NOTIFICATIONS
+// ============================================
+function toast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${message}</span>`;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+}
+
+// ============================================
+// LOADING OVERLAY
+// ============================================
+function showLoading(text = '처리 중...') {
+    document.getElementById('loadingText').textContent = text;
+    document.getElementById('loadingOverlay').classList.add('show');
+}
+
+function hideLoading() {
+    document.getElementById('loadingOverlay').classList.remove('show');
+}
+
+// ============================================
+// GITHUB API HELPERS
+// ============================================
+async function githubAPI(endpoint, method = 'GET', body = null) {
+    const token = state.settings.githubToken;
+    if (!token) throw new Error('GitHub 토큰이 설정되지 않았습니다');
+
+    const headers = {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json'
+    };
+
+    const options = { method, headers };
+    if (body) {
+        headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
     }
 
-    async function loadProblem(url, fileName) {
-        const res = await fetch(url);
-        originalMasterCode = await res.text();
-        const descMatch = originalMasterCode.match(/#\s*(?:설명):\s*([\s\S]*?)(?=\n[^#])/i);
-        let desc = descMatch ? descMatch[1].replace(/\[이미지:\s*(.+?)\]/g, '<img src="$1" style="max-width:100%; display:block; margin:10px 0;">') : "설명 없음";
-        document.getElementById('problemTitle').innerText = fileName;
-        document.getElementById('problemDescription').innerHTML = desc;
+    const res = await fetch(`https://api.github.com${endpoint}`, options);
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `GitHub API Error: ${res.status}`);
     }
 
-    async function executeCode() {
-        const studentCode = document.getElementById('codeEditor').value;
-        await pyodide.runPythonAsync(`import sys, io\nsys.stdout = io.StringIO()`);
-        await pyodide.runPythonAsync(originalMasterCode);
-        const masterOut = pyodide.runPython("sys.stdout.getvalue()").trim();
-        await pyodide.runPythonAsync(`sys.stdout = io.StringIO()`);
-        await pyodide.runPythonAsync(studentCode);
-        const studentOut = pyodide.runPython("sys.stdout.getvalue()").trim();
-        
-        const isCorrect = (masterOut === studentOut);
-        alert(isCorrect ? "정답입니다!" : "오답입니다.");
-        
-        // 시트 전송 로직 (로그인 시에만)
-        const url = document.getElementById('scriptUrl').value;
-        if(currentUser && url) {
-            fetch(url, { method: "POST", body: JSON.stringify({ action: "record_score", repoName: document.getElementById('repoInput').value, className: document.getElementById('className').value, userId: document.getElementById('studentId').value, probName: currentProblemName, status: isCorrect ? "정답" : "오답" }) });
+    return res.json();
+}
+
+async function githubGetFileContent(owner, repo, path, branch = 'main') {
+    try {
+        const data = await githubAPI(`/repos/${owner}/${repo}/contents/${path}?ref=${branch}`);
+        return {
+            content: decodeURIComponent(escape(atob(data.content))),
+            sha: data.sha
+        };
+    } catch (e) {
+        throw new Error(`파일 로드 실패: ${path} - ${e.message}`);
+    }
+}
+
+async function githubPutFile(owner, repo, path, content, message, sha = null, branch = 'main') {
+    const body = {
+        message,
+        content: btoa(unescape(encodeURIComponent(content))),
+        branch
+    };
+    if (sha) body.sha = sha;
+
+    return githubAPI(`/repos/${owner}/${repo}/contents/${path}`, 'PUT', body);
+}
+
+// ============================================
+// GITHUB CONNECTION TEST
+// ============================================
+async function testGithubConnection() {
+    const token = document.getElementById('settingGithubToken').value.trim();
+    if (!token) {
+        toast('토큰을 입력하세요', 'warning');
+        return;
+    }
+
+    try {
+        const res = await fetch('https://api.github.com/user', {
+            headers: { Authorization: `token ${token}` }
+        });
+        if (res.ok) {
+            const user = await res.json();
+            toast(`GitHub 연결 성공! 사용자: ${user.login}`, 'success');
+        } else {
+            toast('토큰이 유효하지 않습니다', 'error');
+        }
+    } catch (e) {
+        toast('연결 실패: ' + e.message, 'error');
+    }
+}
+
+async function testSheetConnection() {
+    const url = document.getElementById('settingSheetUrl').value.trim();
+    if (!url) {
+        toast('Apps Script URL을 입력하세요', 'warning');
+        return;
+    }
+
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'ping' })
+        });
+        toast('Apps Script에 요청을 전송했습니다. 시트를 확인하세요.', 'info');
+    } catch (e) {
+        toast('연결 테스트 실패: ' + e.message, 'error');
+    }
+}
+
+// ============================================
+// STUDENT LOGIN
+// ============================================
+async function studentLogin() {
+    const token = document.getElementById('studentToken').value.trim();
+    const studentId = document.getElementById('studentId').value.trim();
+    const studentClass = document.getElementById('studentClass').value.trim();
+    const repo = document.getElementById('studentRepo').value.trim();
+
+    if (!studentId) {
+        toast('학생 ID를 입력하세요', 'warning');
+        return;
+    }
+
+    if (!repo) {
+        toast('문제 레포지토리를 입력하세요', 'warning');
+        return;
+    }
+
+    // Validate token if provided
+    let githubUser = null;
+    if (token) {
+        try {
+            const res = await fetch('https://api.github.com/user', {
+                headers: { Authorization: `token ${token}` }
+            });
+            if (res.ok) {
+                githubUser = await res.json();
+            } else {
+                toast('GitHub 토큰이 유효하지 않습니다', 'error');
+                return;
+            }
+        } catch (e) {
+            toast('GitHub 연결 실패: ' + e.message, 'error');
+            return;
         }
     }
 
-    // [Studio] Logic
-    function generateCode() {
-        const title = document.getElementById('s_title').value;
-        const desc = document.getElementById('s_desc').value;
-        const code = document.getElementById('s_code').value;
-        document.getElementById('outputCode').value = `# 문제: ${title}\n# 설명:\n# ${desc.replace(/\n/g, '\n# ')}\n\n${code}`;
+    // Save student state
+    state.student = {
+        id: studentId,
+        className: studentClass,
+        token: token,
+        isLoggedIn: true,
+        isGuest: false,
+        githubUser: githubUser
+    };
+
+    // Save repo setting
+    state.settings.githubRepo = repo;
+    if (token) state.settings.githubToken = token;
+    localStorage.setItem('gitco_settings', JSON.stringify(state.settings));
+
+    // Update UI
+    showStudentUI();
+    loadProblems();
+
+    toast(`${studentId}님, 환영합니다!`, 'success');
+}
+
+function guestLogin() {
+    const repo = document.getElementById('studentRepo').value.trim();
+    if (!repo) {
+        toast('문제 레포지토리를 입력하세요', 'warning');
+        return;
     }
 
-    function downloadPy() {
-        const blob = new Blob([document.getElementById('outputCode').value], { type: "text/x-python" });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = "problem.py"; a.click();
+    state.student = {
+        id: 'Guest_' + Date.now().toString(36),
+        className: 'Guest',
+        token: document.getElementById('studentToken').value.trim(),
+        isLoggedIn: true,
+        isGuest: true
+    };
+
+    state.settings.githubRepo = repo;
+    const token = document.getElementById('studentToken').value.trim();
+    if (token) state.settings.githubToken = token;
+    localStorage.setItem('gitco_settings', JSON.stringify(state.settings));
+
+    showStudentUI();
+    loadProblems();
+
+    toast('게스트 모드로 시작합니다 (기록 저장 안됨)', 'info');
+}
+
+function showStudentUI() {
+    document.getElementById('loginPanel').style.display = 'none';
+    document.getElementById('lmsMain').style.display = 'block';
+
+    const badge = document.getElementById('userBadge');
+    badge.style.display = 'flex';
+    document.getElementById('userName').textContent = state.student.id;
+    document.getElementById('userAvatar').textContent = state.student.id[0].toUpperCase();
+
+    updateStudioUI();
+}
+
+// ============================================
+// PROBLEM LOADING (from GitHub)
+// ============================================
+async function loadProblems() {
+    const repo = state.settings.githubRepo;
+    if (!repo) return;
+
+    const [owner, repoName] = repo.split('/');
+
+    showLoading('GitHub에서 문제를 불러오는 중...');
+
+    try {
+        // Get the tree of the repo to find all .py files
+        const branch = state.settings.githubBranch || 'main';
+
+        let allFiles = [];
+
+        // Method 1: Try to get files from a known 'problems' directory
+        try {
+            const tree = await githubAPI(`/repos/${owner}/${repoName}/git/trees/${branch}?recursive=1`);
+            allFiles = tree.tree.filter(f =>
+                f.path.endsWith('.py') && f.type === 'blob'
+            );
+        } catch (e) {
+            // Fallback: try to list root directory
+            const contents = await githubAPI(`/repos/${owner}/${repoName}/contents/?ref=${branch}`);
+            allFiles = contents.filter(f => f.name.endsWith('.py')).map(f => ({
+                path: f.path,
+                type: 'blob'
+            }));
+        }
+
+        state.problems = [];
+
+        // Load each .py file and parse metadata
+        for (const file of allFiles) {
+            try {
+                const { content } = await githubGetFileContent(owner, repoName, file.path, branch);
+                const problem = parseProblemPy(file.path, content);
+                if (problem) {
+                    state.problems.push(problem);
+                }
+            } catch (e) {
+                console.warn(`Failed to load ${file.path}:`, e);
+            }
+        }
+
+        renderProblemList();
+        hideLoading();
+
+        if (state.problems.length > 0) {
+            toast(`${state.problems.length}개의 문제를 불러왔습니다`, 'success');
+        } else {
+            toast('문제를 찾을 수 없습니다. .py 파일이 올바른 형식인지 확인하세요.', 'warning');
+        }
+
+    } catch (e) {
+        hideLoading();
+        toast('문제 로딩 실패: ' + e.message, 'error');
     }
+}
+
+function parseProblemPy(filepath, content) {
+    // Parse metadata from # comments at the top of the file
+    const lines = content.split('\n');
+    const meta = {};
+    let bodyLines = [];
+    let inBody = false;
+    let codeLines = [];
+    let inCode = false;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (!inBody && trimmed.startsWith('# 문제:')) {
+            meta.title = trimmed.replace('# 문제:', '').trim();
+        } else if (!inBody && trimmed.startsWith('# 점수:')) {
+            meta.score = parseInt(trimmed.replace('# 점수:', '').trim()) || 10;
+        } else if (!inBody && trimmed.startsWith('# 난이도:')) {
+            meta.difficulty = trimmed.replace('# 난이도:', '').trim();
+        } else if (!inBody && trimmed.startsWith('# 설명:')) {
+            inBody = true;
+            bodyLines.push(trimmed.replace('# 설명:', '').trim());
+        } else if (inBody && trimmed.startsWith('#')) {
+            bodyLines.push(trimmed.replace(/^#\s?/, ''));
+        } else if (inBody && !trimmed.startsWith('#')) {
+            inBody = false;
+            inCode = true;
+            codeLines.push(line);
+        } else if (inCode) {
+            codeLines.push(line);
+        }
+    }
+
+    if (!meta.title) return null;
+
+    // Parse answer code and test input from the code section
+    let answerCode = '';
+    let testInput = '';
+    let sampleCode = '';
+
+    const codeContent = codeLines.join('\n');
+
+    // Look for answer code marker
+    const answerMatch = codeContent.match(/# ANSWER_CODE_START\n([\s\S]*?)# ANSWER_CODE_END/);
+    if (answerMatch) {
+        answerCode = answerMatch[1].trim();
+    }
+
+    // Look for test input marker
+    const testInputMatch = codeContent.match(/# TEST_INPUT_START\n([\s\S]*?)# TEST_INPUT_END/);
+    if (testInputMatch) {
+        testInput = testInputMatch[1].trim();
+    }
+
+    // Look for sample code marker
+    const sampleMatch = codeContent.match(/# SAMPLE_CODE_START\n([\s\S]*?)# SAMPLE_CODE_END/);
+    if (sampleMatch) {
+        sampleCode = sampleMatch[1].trim();
+    } else {
+        // Everything not in special markers is sample code
+        sampleCode = codeContent.replace(/# (ANSWER|TEST|SAMPLE)_\w+_START[\s\S]*?# (ANSWER|TEST|SAMPLE)_\w+_END/g, '').trim();
+    }
+
+    return {
+        id: filepath,
+        filepath,
+        title: meta.title,
+        score: meta.score || 10,
+        difficulty: meta.difficulty || '보통',
+        description: bodyLines.join('\n'),
+        answerCode,
+        testInput,
+        sampleCode
+    };
+}
+
+// ============================================
+// PROBLEM LIST RENDERING
+// ============================================
+function renderProblemList() {
+    const container = document.getElementById('problemList');
+
+    if (state.problems.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <div class="text">문제가 없습니다</div>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = state.problems.map((p, i) => {
+        const isSolved = state.solved.has(p.id);
+        return `
+            <div class="problem-item ${state.currentProblem?.id === p.id ? 'active' : ''}"
+                 onclick="selectProblem('${p.id}')">
+                <div class="num">${i + 1}</div>
+                <div class="info">
+                    <div class="title">${escapeHtml(p.title)}</div>
+                    <div class="score">${p.score}점 · ${p.difficulty}</div>
+                </div>
+                <span class="badge ${isSolved ? 'badge-solved' : 'badge-unsolved'}">
+                    ${isSolved ? '✅' : '⬜'}
+                </span>
+            </div>`;
+    }).join('');
+}
+
+function refreshProblems() {
+    loadProblems();
+}
+
+function selectProblem(problemId) {
+    const problem = state.problems.find(p => p.id === problemId);
+    if (!problem) return;
+
+    state.currentProblem = problem;
+    renderProblemList();
+    renderProblemDetail(problem);
+}
+
+// ============================================
+// PROBLEM DETAIL RENDERING
+// ============================================
+function renderProblemDetail(problem) {
+    const container = document.getElementById('problemDetail');
+
+    // Render description with markdown and image support
+    let descriptionHtml = renderMarkdown(problem.description);
+
+    container.innerHTML = `
+        <div class="problem-description">
+            <h2>${escapeHtml(problem.title)}</h2>
+            <div class="meta">
+                <span>📊 ${problem.score}점</span>
+                <span>🎯 ${problem.difficulty}</span>
+                <span>📁 ${escapeHtml(problem.filepath)}</span>
+            </div>
+            <div class="body">${descriptionHtml}</div>
+        </div>
+
+        <div class="code-area">
+            <div class="code-toolbar">
+                <span class="lang">🐍 Python</span>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-sm" onclick="resetCode()">↩️ 초기화</button>
+                    <button class="btn btn-sm" onclick="runCode(false)">▶️ 실행</button>
+                    <button class="btn btn-sm btn-primary" onclick="runCode(true)"
+                            ${state.student.isGuest ? 'disabled title="게스트 모드에서는 채점 불가"' : ''}>
+                        ✅ 제출 & 채점
+                    </button>
+                </div>
+            </div>
+            <textarea class="code-editor" id="codeEditor"
+                      placeholder="여기에 Python 코드를 작성하세요..."
+                      onkeydown="handleTab(event)"
+            >${escapeHtml(problem.sampleCode || '# 여기에 코드를 작성하세요\n')}</textarea>
+        </div>
+
+        <div class="output-area">
+            <div class="output-header">
+                <span class="title">📺 실행 결과</span>
+                <span style="font-size:12px;color:var(--text-muted);" id="executionTime"></span>
+            </div>
+            <div class="output-content" id="outputContent">
+                코드를 실행하면 결과가 여기에 표시됩니다
+            </div>
+        </div>
+    `;
+}
+
+function resetCode() {
+    if (state.currentProblem) {
+        document.getElementById('codeEditor').value =
+            state.currentProblem.sampleCode || '# 여기에 코드를 작성하세요\n';
+    }
+}
+
+// Handle Tab key in code editor (insert spaces)
+function handleTab(event) {
+    if (event.key === 'Tab') {
+        event.preventDefault();
+        const editor = event.target;
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
+        editor.selectionStart = editor.selectionEnd = start + 4;
+    }
+}
+
+// ============================================
+// PYTHON CODE EXECUTION (Pyodide)
+// ============================================
+async function runCode(isSubmit) {
+    if (!state.pyodideReady) {
+        toast('Python 실행 환경이 아직 준비되지 않았습니다', 'warning');
+        return;
+    }
+
+    const code = document.getElementById('codeEditor').value;
+    const outputEl = document.getElementById('outputContent');
+    const timeEl = document.getElementById('executionTime');
+
+    if (!code.trim()) {
+        toast('코드를 입력하세요', 'warning');
+        return;
+    }
+
+    outputEl.className = 'output-content info';
+    outputEl.textContent = '실행 중...';
+
+    const startTime = performance.now();
+
+    try {
+        // Set timeout
+        const timeout = (state.settings.timeout || 10) * 1000;
+
+        // Prepare input if test input exists
+        let inputSetup = '';
+        if (state.currentProblem?.testInput && isSubmit) {
+            const inputLines = state.currentProblem.testInput.split('\n');
+            inputSetup = `
+import sys
+from io import StringIO
+_input_data = ${JSON.stringify(inputLines)}
+_input_index = 0
+def input(prompt=''):
+    global _input_index
+    if _input_index < len(_input_data):
+        val = _input_data[_input_index]
+        _input_index += 1
+        return val
+    return ''
+`;
+        }
+
+        // Redirect stdout
+        const wrappedCode = `
+import sys
+from io import StringIO
+_stdout = StringIO()
+sys.stdout = _stdout
+${inputSetup}
+try:
+${code.split('\n').map(l => '    ' + l).join('\n')}
+except Exception as e:
+    print(f"Error: {type(e).__name__}: {e}")
+sys.stdout = sys.__stdout__
+_stdout.getvalue()
+`;
+
+        // Run with timeout
+        const resultPromise = state.pyodide.runPythonAsync(wrappedCode);
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`실행 시간 초과 (${state.settings.timeout}초)`)), timeout)
+        );
+
+        const result = await Promise.race([resultPromise, timeoutPromise]);
+        const elapsed = (performance.now() - startTime).toFixed(0);
+
+        const output = result.toString();
+        timeEl.textContent = `${elapsed}ms`;
+
+        if (isSubmit && !state.student.isGuest) {
+            // Grading mode
+            await gradeAndRecord(code, output);
+        } else {
+            outputEl.className = 'output-content success';
+            outputEl.textContent = output || '(출력 없음)';
+        }
+
+    } catch (e) {
+        const elapsed = (performance.now() - startTime).toFixed(0);
+        timeEl.textContent = `${elapsed}ms`;
+
+        outputEl.className = 'output-content error';
+        outputEl.textContent = e.message;
+
+        if (isSubmit && !state.student.isGuest) {
+            // Record error as wrong answer
+            await recordSubmission(code, false, 0);
+        }
+    }
+}
+
+// ============================================
+// AUTO-GRADING
+// ============================================
+async function gradeAndRecord(studentCode, studentOutput) {
+    const problem = state.currentProblem;
+    if (!problem) return;
+
+    const outputEl = document.getElementById('outputContent');
+
+    // If there's no answer code, just show output
+    if (!problem.answerCode) {
+        outputEl.className = 'output-content success';
+        outputEl.textContent = studentOutput || '(출력 없음)';
+        toast('정답 코드가 설정되지 않아 수동 확인이 필요합니다', 'warning');
+        await recordSubmission(studentCode, null, problem.score);
+        return;
+    }
+
+    try {
+        // Run answer code to get expected output
+        let inputSetup = '';
+        if (problem.testInput) {
+            const inputLines = problem.testInput.split('\n');
+            inputSetup = `
+import sys
+from io import StringIO
+_input_data = ${JSON.stringify(inputLines)}
+_input_index = 0
+def input(prompt=''):
+    global _input_index
+    if _input_index < len(_input_data):
+        val = _input_data[_input_index]
+        _input_index += 1
+        return val
+    return ''
+`;
+        }
+
+        const answerWrapped = `
+import sys
+from io import StringIO
+_stdout = StringIO()
+sys.stdout = _stdout
+${inputSetup}
+try:
+${problem.answerCode.split('\n').map(l => '    ' + l).join('\n')}
+except Exception as e:
+    print(f"Error: {type(e).__name__}: {e}")
+sys.stdout = sys.__stdout__
+_stdout.getvalue()
+`;
+
+        const expectedOutput = (await state.pyodide.runPythonAsync(answerWrapped)).toString();
+
+        // Compare outputs
+        const mode = state.settings.gradingMode || 'strip';
+        let isCorrect = false;
+
+        switch (mode) {
+            case 'exact':
+                isCorrect = studentOutput === expectedOutput;
+                break;
+            case 'strip':
+                isCorrect = studentOutput.trim() === expectedOutput.trim();
+                break;
+            case 'contains':
+                isCorrect = studentOutput.includes(expectedOutput.trim());
+                break;
+        }
+
+        const earnedScore = isCorrect ? problem.score : 0;
+
+        // Show result
+        if (isCorrect) {
+            outputEl.className = 'output-content success';
+            outputEl.textContent = `✅ 정답입니다! (+${earnedScore}점)\n\n출력:\n${studentOutput}`;
+            state.solved.add(problem.id);
+            localStorage.setItem('gitco_solved', JSON.stringify([...state.solved]));
+            renderProblemList();
+        } else {
+            outputEl.className = 'output-content error';
+            outputEl.textContent = `❌ 틀렸습니다\n\n내 출력:\n${studentOutput}\n\n기대 출력:\n${expectedOutput}`;
+        }
+
+        await recordSubmission(studentCode, isCorrect, earnedScore);
+
+    } catch (e) {
+        outputEl.className = 'output-content error';
+        outputEl.textContent = `채점 중 오류 발생: ${e.message}`;
+        await recordSubmission(studentCode, false, 0);
+    }
+}
+
+// ============================================
+// RECORD SUBMISSION (Google Sheet + GitHub)
+// ============================================
+async function recordSubmission(code, isCorrect, score) {
+    const problem = state.currentProblem;
+    if (!problem) return;
+
+    const record = {
+        timestamp: new Date().toISOString(),
+        studentId: state.student.id,
+        className: state.student.className,
+        problemTitle: problem.title,
+        problemFile: problem.filepath,
+        result: isCorrect === null ? 'submitted' : (isCorrect ? 'correct' : 'wrong'),
+        score: score,
+        maxScore: problem.score,
+        code: code
+    };
+
+    // 1. Send to Google Sheet
+    if (state.settings.sheetUrl) {
+        try {
+            await fetch(state.settings.sheetUrl, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'submit',
+                    ...record
+                })
+            });
+        } catch (e) {
+            console.warn('Sheet recording failed:', e);
+        }
+    }
+
+    // 2. Save to GitHub (student fork) if student has token
+    if (state.student.token && state.settings.githubRepo && !state.student.isGuest) {
+        try {
+            const [owner, repoName] = state.settings.githubRepo.split('/');
+            const studentId = state.student.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const solutionPath = `solutions/${studentId}/${problem.filepath.split('/').pop()}`;
+
+            // Try to upload solution file
+            let existingSha = null;
+            try {
+                const existing = await githubAPI(
+                    `/repos/${owner}/${repoName}/contents/${solutionPath}?ref=${state.settings.githubBranch}`
+                );
+                existingSha = existing.sha;
+            } catch (e) { /* File doesn't exist yet */ }
+
+            await githubPutFile(
+                owner, repoName, solutionPath,
+                `# Student: ${state.student.id}\n# Class: ${state.student.className}\n# Problem: ${problem.title}\n# Result: ${record.result}\n# Score: ${score}/${problem.score}\n# Time: ${record.timestamp}\n\n${code}`,
+                `[GitCo] ${state.student.id} - ${problem.title} (${record.result})`,
+                existingSha,
+                state.settings.githubBranch
+            );
+
+            toast('GitHub에 답안이 저장되었습니다', 'success');
+        } catch (e) {
+            console.warn('GitHub recording failed:', e);
+        }
+    }
+
+    // 3. Save to local records
+    state.records.unshift(record);
+    localStorage.setItem('gitco_records', JSON.stringify(state.records.slice(0, 500)));
+}
+
+// ============================================
+// RECORDS PAGE
+// ============================================
+async function loadRecords() {
+    // Load from local storage
+    const saved = localStorage.getItem('gitco_records');
+    if (saved) {
+        state.records = JSON.parse(saved);
+    }
+
+    // Also try to fetch from Google Sheet
+    if (state.settings.sheetUrl && state.settings.sheetId) {
+        try {
+            // Attempt to read sheet data via published CSV
+            const csvUrl = `https://docs.google.com/spreadsheets/d/${state.settings.sheetId}/gviz/tq?tqx=out:json`;
+            const res = await fetch(csvUrl);
+            if (res.ok) {
+                const text = await res.text();
+                // Parse Google Visualization API response
+                const jsonStr = text.match(/google.visualization.Query.setResponse\((.*)\);/)?.[1];
+                if (jsonStr) {
+                    const data = JSON.parse(jsonStr);
+                    // Convert to records format
+                    if (data.table?.rows) {
+                        const sheetRecords = data.table.rows.map(row => ({
+                            timestamp: row.c[0]?.v || '',
+                            studentId: row.c[1]?.v || '',
+                            className: row.c[2]?.v || '',
+                            problemTitle: row.c[3]?.v || '',
+                            result: row.c[4]?.v || '',
+                            score: row.c[5]?.v || 0,
+                            maxScore: row.c[6]?.v || 0
+                        }));
+                        // Merge (avoid duplicates)
+                        state.records = sheetRecords;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Sheet fetch failed:', e);
+        }
+    }
+
+    renderRecords();
+    updateStats();
+}
+
+function renderRecords() {
+    const tbody = document.getElementById('recordsBody');
+    const search = document.getElementById('recordSearch')?.value?.toLowerCase() || '';
+
+    let filtered = state.records;
+    if (search) {
+        filtered = filtered.filter(r =>
+            r.studentId?.toLowerCase().includes(search) ||
+            r.problemTitle?.toLowerCase().includes(search)
+        );
+    }
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `
+            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">
+                기록이 없습니다
+            </td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map((r, i) => {
+        const resultClass = r.result === 'correct' ? 'result-pass' :
+                            r.result === 'wrong' ? 'result-fail' : '';
+        const resultText = r.result === 'correct' ? '✅ 정답' :
+                           r.result === 'wrong' ? '❌ 오답' : '📝 제출';
+        const time = r.timestamp ? new Date(r.timestamp).toLocaleString('ko-KR') : '-';
+
+        return `<tr>
+            <td>${time}</td>
+            <td><strong>${escapeHtml(r.studentId || '-')}</strong></td>
+            <td>${escapeHtml(r.className || '-')}</td>
+            <td>${escapeHtml(r.problemTitle || '-')}</td>
+            <td class="${resultClass}">${resultText}</td>
+            <td>${r.score ?? 0} / ${r.maxScore ?? 0}</td>
+            <td>
+                <button class="btn btn-sm" onclick="viewCode(${i})">보기</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function filterRecords() {
+    renderRecords();
+}
+
+function updateStats() {
+    const records = state.records;
+    const uniqueStudents = new Set(records.map(r => r.studentId)).size;
+    const totalSubmissions = records.length;
+    const totalCorrect = records.filter(r => r.result === 'correct').length;
+    const avgRate = totalSubmissions > 0
+        ? Math.round((totalCorrect / totalSubmissions) * 100)
+        : 0;
+
+    document.getElementById('statTotalStudents').textContent = uniqueStudents;
+    document.getElementById('statTotalSubmissions').textContent = totalSubmissions;
+    document.getElementById('statTotalCorrect').textContent = totalCorrect;
+    document.getElementById('statAvgScore').textContent = avgRate + '%';
+}
+
+function viewCode(index) {
+    const record = state.records[index];
+    if (!record?.code) {
+        toast('저장된 코드가 없습니다', 'warning');
+        return;
+    }
+
+    document.getElementById('codeViewContent').textContent = record.code;
+    openModal('codeViewModal');
+    hljs.highlightElement(document.getElementById('codeViewContent'));
+}
+
+function exportCSV() {
+    if (state.records.length === 0) {
+        toast('내보낼 기록이 없습니다', 'warning');
+        return;
+    }
+
+    const headers = ['시간', '학생ID', '반', '문제', '결과', '점수', '만점'];
+    const rows = state.records.map(r => [
+        r.timestamp,
+        r.studentId,
+        r.className,
+        r.problemTitle,
+        r.result,
+        r.score,
+        r.maxScore
+    ]);
+
+    const csv = [headers, ...rows]
+        .map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gitco_records_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast('CSV 파일이 다운로드되었습니다', 'success');
+}
+
+// ============================================
+// STUDIO - PROBLEM CREATION
+// ============================================
+function previewProblem() {
+    const title = document.getElementById('studioTitle').value.trim();
+    const score = document.getElementById('studioScore').value.trim();
+    const difficulty = document.getElementById('studioDifficulty').value;
+    const description = document.getElementById('studioDescription').value.trim();
+    const inputExample = document.getElementById('studioInputExample').value.trim();
+    const outputExample = document.getElementById('studioOutputExample').value.trim();
+    const answerCode = document.getElementById('studioAnswerCode').value.trim();
+    const testInput = document.getElementById('studioTestInput').value.trim();
+
+    // Generate .py file preview
+    const pyContent = generatePyContent(title, score, difficulty, description,
+                                         inputExample, outputExample, answerCode, testInput);
+
+    const previewEl = document.getElementById('studioPreview');
+    previewEl.textContent = pyContent;
+
+    // Render markdown preview
+    const mdPreview = document.getElementById('studioMarkdownPreview');
+    let descFormatted = description;
+    if (inputExample) descFormatted += `\n\n**입력 예시:** \`${inputExample}\``;
+    if (outputExample) descFormatted += `\n\n**출력 예시:** \`${outputExample}\``;
+    mdPreview.innerHTML = renderMarkdown(descFormatted);
+
+    // Auto-generate filename
+    const filenameEl = document.getElementById('studioFilename');
+    if (!filenameEl.value) {
+        const safeName = (title || 'untitled').replace(/[^a-zA-Z0-9ㄱ-ㅎ가-힣]/g, '_').substring(0, 30);
+        filenameEl.value = `problems/${safeName}.py`;
+    }
+}
+
+function generatePyContent(title, score, difficulty, description,
+                            inputExample, outputExample, answerCode, testInput) {
+    let lines = [];
+
+    // Header metadata comments
+    lines.push(`# 문제: ${title || '제목 없음'}`);
+    lines.push(`# 점수: ${score || 10}`);
+    lines.push(`# 난이도: ${difficulty || '보통'}`);
+    lines.push(`# 설명: ${description || '설명 없음'}`);
+
+    // Add multi-line description lines
+    const descLines = (description || '').split('\n');
+    for (let i = 1; i < descLines.length; i++) {
+        lines.push(`# ${descLines[i]}`);
+    }
+
+    if (inputExample) lines.push(`# 입력 예시: ${inputExample}`);
+    if (outputExample) lines.push(`# 출력 예시: ${outputExample}`);
+
+    lines.push('');
+
+    // Sample code section
+    lines.push('# SAMPLE_CODE_START');
+    lines.push('# 학생이 작성할 코드 영역입니다');
+    lines.push('');
+    lines.push('');
+    lines.push('# SAMPLE_CODE_END');
+
+    // Answer code section (for auto-grading)
+    if (answerCode) {
+        lines.push('');
+        lines.push('# ANSWER_CODE_START');
+        lines.push(answerCode);
+        lines.push('# ANSWER_CODE_END');
+    }
+
+    // Test input section
+    if (testInput) {
+        lines.push('');
+        lines.push('# TEST_INPUT_START');
+        lines.push(testInput);
+        lines.push('# TEST_INPUT_END');
+    }
+
+    return lines.join('\n');
+}
+
+function generatePyFile() {
+    previewProblem(); // Update preview first
+
+    const filename = document.getElementById('studioFilename').value || 'problem.py';
+    const content = document.getElementById('studioPreview').textContent;
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.split('/').pop();
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast(`.py 파일이 다운로드되었습니다: ${filename}`, 'success');
+}
+
+// ============================================
+// STUDIO - UPLOAD TO GITHUB
+// ============================================
+async function uploadToGitHub() {
+    if (!state.settings.githubToken) {
+        toast('설정에서 GitHub 토큰을 먼저 입력하세요', 'warning');
+        openModal('settingsModal');
+        return;
+    }
+
+    if (!state.settings.githubRepo) {
+        toast('설정에서 GitHub 레포지토리를 먼저 설정하세요', 'warning');
+        openModal('settingsModal');
+        return;
+    }
+
+    previewProblem(); // Update preview
+
+    const filename = document.getElementById('studioFilename').value;
+    if (!filename) {
+        toast('파일 경로를 입력하세요', 'warning');
+        return;
+    }
+
+    const content = document.getElementById('studioPreview').textContent;
+    const [owner, repoName] = state.settings.githubRepo.split('/');
+    const branch = state.settings.githubBranch || 'main';
+    const title = document.getElementById('studioTitle').value || '새 문제';
+
+    showLoading('GitHub에 업로드 중...');
+
+    try {
+        // Check if file already exists
+        let existingSha = null;
+        try {
+            const existing = await githubAPI(
+                `/repos/${owner}/${repoName}/contents/${filename}?ref=${branch}`
+            );
+            existingSha = existing.sha;
+        } catch (e) { /* File doesn't exist */ }
+
+        await githubPutFile(
+            owner, repoName, filename, content,
+            `[GitCo Studio] 문제 출제: ${title}`,
+            existingSha, branch
+        );
+
+        hideLoading();
+        toast(`GitHub에 업로드 완료! ${filename}`, 'success');
+    } catch (e) {
+        hideLoading();
+        toast('GitHub 업로드 실패: ' + e.message, 'error');
+    }
+}
+
+// ============================================
+// APPS SCRIPT CODE (for copy button)
+// ============================================
+const APPS_SCRIPT_CODE = `
+// ============================================
+// GitCo - Google Apps Script
+// Google Sheet에 연결하여 학습 기록을 저장합니다.
+//
+// 배포 방법:
+// 1. Google Sheet 열기 → 확장 프로그램 → Apps Script
+// 2. 이 코드를 붙여넣기
+// 3. 배포 → 웹 앱 배포 → 액세스: 모든 사용자
+// 4. 배포 URL을 GitCo 설정에 입력
+// ============================================
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+
+    // Ping test
+    if (data.action === 'ping') {
+      return ContentService.createTextOutput(
+        JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Submit record
+    if (data.action === 'submit') {
+      const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Records')
+        || createRecordsSheet();
+
+      sheet.appendRow([
+        new Date(),                          // A: 시간
+        data.studentId || '',                // B: 학생 ID
+        data.className || '',                // C: 반
+        data.problemTitle || '',             // D: 문제 제목
+        data.problemFile || '',              // E: 문제 파일 경로
+        data.result || '',                   // F: 결과 (correct/wrong/submitted)
+        data.score || 0,                     // G: 획득 점수
+        data.maxScore || 0,                  // H: 만점
+        data.code || ''                      // I: 제출 코드
+      ]);
+
+      return ContentService.createTextOutput(
+        JSON.stringify({ status: 'recorded' })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(
+      JSON.stringify({ status: 'unknown_action' })
+    ).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(
+      JSON.stringify({ status: 'error', message: err.message })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  // Return records as JSON (for dashboard)
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Records');
+    if (!sheet) {
+      return ContentService.createTextOutput(
+        JSON.stringify({ records: [] })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const records = data.slice(1).map(row => ({
+      timestamp: row[0],
+      studentId: row[1],
+      className: row[2],
+      problemTitle: row[3],
+      problemFile: row[4],
+      result: row[5],
+      score: row[6],
+      maxScore: row[7]
+    }));
+
+    return ContentService.createTextOutput(
+      JSON.stringify({ records })
+    ).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(
+      JSON.stringify({ error: err.message })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function createRecordsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.insertSheet('Records');
+  sheet.appendRow([
+    '시간', '학생ID', '반', '문제', '파일경로', '결과', '획득점수', '만점', '제출코드'
+  ]);
+
+  // Format header
+  const headerRange = sheet.getRange(1, 1, 1, 9);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#21262d');
+  headerRange.setFontColor('#e6edf3');
+
+  // Set column widths
+  sheet.setColumnWidth(1, 180);  // 시간
+  sheet.setColumnWidth(2, 120);  // 학생ID
+  sheet.setColumnWidth(3, 100);  // 반
+  sheet.setColumnWidth(4, 200);  // 문제
+  sheet.setColumnWidth(5, 200);  // 파일경로
+  sheet.setColumnWidth(6, 100);  // 결과
+  sheet.setColumnWidth(7, 80);   // 획득점수
+  sheet.setColumnWidth(8, 60);   // 만점
+  sheet.setColumnWidth(9, 300);  // 코드
+
+  // Freeze header
+  sheet.setFrozenRows(1);
+
+  return sheet;
+}
+`;
+
+function copyAppsScript() {
+    navigator.clipboard.writeText(APPS_SCRIPT_CODE.trim()).then(() => {
+        toast('Apps Script 코드가 클립보드에 복사되었습니다', 'success');
+    }).catch(() => {
+        toast('복사 실패. 직접 코드를 복사하세요', 'error');
+    });
+}
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function renderMarkdown(text) {
+    if (!text) return '';
+
+    // Process [이미지: URL] tags
+    let processed = text.replace(
+        /\[이미지:\s*(https?:\/\/[^\]]+)\]/g,
+        '<img src="$1" alt="문제 이미지" loading="lazy">'
+    );
+
+    // Use marked.js for markdown rendering
+    try {
+        if (typeof marked !== 'undefined') {
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: false,
+                mangle: false
+            });
+            processed = marked.parse(processed);
+        }
+    } catch (e) {
+        // Fallback: basic line break
+        processed = processed.replace(/\n/g, '<br>');
+    }
+
+    // Sanitize HTML
+    try {
+        if (typeof DOMPurify !== 'undefined') {
+            processed = DOMPurify.sanitize(processed, {
+                ADD_TAGS: ['img'],
+                ADD_ATTR: ['src', 'alt', 'loading']
+            });
+        }
+    } catch (e) { /* Use as-is */ }
+
+    return processed;
+}
+
+// ============================================
+// KEYBOARD SHORTCUTS
+// ============================================
+document.addEventListener('keydown', (e) => {
+    // Ctrl+Enter: Run code
+    if (e.ctrlKey && e.key === 'Enter') {
+        const editor = document.getElementById('codeEditor');
+        if (document.activeElement === editor) {
+            e.preventDefault();
+            runCode(e.shiftKey); // Shift+Ctrl+Enter = Submit
+        }
+    }
+
+    // Escape: Close modals
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+    }
+});
+
+// ============================================
+// STUDIO LIVE PREVIEW
+// ============================================
+['studioTitle', 'studioScore', 'studioDescription',
+ 'studioInputExample', 'studioOutputExample',
+ 'studioAnswerCode', 'studioTestInput'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('input', debounce(previewProblem, 500));
+    }
+});
+
+function debounce(fn, delay) {
+    let timer;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+// ============================================
+// INITIAL SETUP
+// ============================================
+updateStudioUI();
 </script>
+
 </body>
 </html>
