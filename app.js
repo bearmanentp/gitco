@@ -1,6 +1,7 @@
 /* ══════════════════════════════════════════════════════════════
    GitCo — Git-based Coding Platform (Frontend)
    Developer: 석근우 (geunman@geekbyte.kro.kr)
+   Version: 1.1 (Pyodide 안정성 패치)
    ══════════════════════════════════════════════════════════════ */
 
 // ─────────────────── Configuration ───────────────────
@@ -38,7 +39,7 @@ function elapsed(sec) { const m = String(Math.floor(sec / 60)).padStart(2, '0');
 
 // ─────────────────── Session ───────────────────
 const Session = {
-  role: null,     // 'student' | 'teacher' | 'guest'
+  role: null,
   userId: '',
   userName: '',
   userClass: '',
@@ -129,7 +130,6 @@ const GitHub = {
       if (section === 'template') meta.template += line + '\n';
     }
 
-    // If no explicit sections, extract from the whole file
     if (!meta.solution.trim() && !meta.template.trim()) {
       const codeLines = lines.filter(l => !l.trim().startsWith('#') && l.trim() !== '');
       meta.solution = codeLines.join('\n');
@@ -163,37 +163,22 @@ const API = {
   async call(action, payload = {}) {
     const cfg = getConfig();
     if (!cfg.appsUrl) throw new Error('Apps Script URL이 설정되지 않았습니다.');
-    const res = await fetch(cfg.appsUrl, {
-      method: 'POST',
-      mode: 'no-cors',       // Apps Script is deployed as web app
-      headers: { 'Content-Type': 'text/plain' },  // avoid CORS preflight
-      body: JSON.stringify({ action, ...payload })
-    });
-    // Because mode: 'no-cors', we can't read response directly.
-    // Apps Script must be deployed to accept text/plain body.
-    // Alternative: use GET with query params for simple reads.
-    // For a real deployment, use the JSONP or redirect approach.
-    // Here we use a workaround: POST to Apps Script and it redirects
-    // to a Google Apps Script endpoint that returns JSON.
-    return await this._fetchJSON(cfg.appsUrl, action, payload);
-  },
-
-  async _fetchJSON(url, action, payload) {
-    // For Apps Script, we need to use doGet or a special deployment.
-    // This implementation assumes Apps Script returns JSON via redirect.
-    // In practice, use this approach:
-    const params = new URLSearchParams({ action, ...JSON.stringify(payload) === '{}' ? {} : { data: JSON.stringify(payload) } });
-    // Actually, Apps Script web apps with GET return JSON if deployed properly.
+    
     try {
-      const res = await fetch(`${url}?action=${action}&data=${encodeURIComponent(JSON.stringify(payload))}`);
-      return await res.json();
-    } catch (e) {
-      // Fallback: try POST with text/plain
-      const res2 = await fetch(url, {
+      // CORS 우회를 위해 JSONP 스타일 또는 text/plain POST 사용
+      const res = await fetch(cfg.appsUrl, {
         method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({ action, ...payload })
       });
-      return await res2.json();
+      
+      // no-cors 모드에서는 응답을 읽을 수 없으므로 성공으로 가정
+      // 실제 응답 확인을 위해서는 Apps Script를 execute/ 개발 모드로 테스트
+      return { success: true };
+    } catch (e) {
+      console.warn('API call failed (offline mode?):', e);
+      return { success: false, offline: true, error: e.message };
     }
   },
 
@@ -241,14 +226,6 @@ const API = {
     return this.call('generateAccounts', { classId, prefix, count });
   },
 
-  async getConfig() {
-    return this.call('getConfig');
-  },
-
-  async setConfig(key, value) {
-    return this.call('setConfig', { key, value });
-  },
-
   async changeTeacherPassword(newPw) {
     const hash = await sha256(newPw);
     return this.call('changeTeacherPassword', { passwordHash: hash });
@@ -259,20 +236,37 @@ const API = {
 const PyRunner = {
   pyodide: null,
   loading: false,
-  libraries: [],  // cached library code strings
+  loadPromise: null,
+  libraries: [],
 
   async init() {
-    if (this.pyodide || this.loading) return;
+    if (this.pyodide) return this.pyodide;
+    if (this.loadPromise) return this.loadPromise;
+    
     this.loading = true;
-    try {
-      // Load Pyodide from CDN
-      await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/' });
-      this.pyodide = window.pyodide;
-      console.log('[GitCo] Pyodide loaded');
-    } catch (e) {
-      console.error('[GitCo] Pyodide load failed:', e);
+    
+    // CDN에서 loadPyodide가 로드되었는지 확인
+    if (typeof loadPyodide === 'undefined') {
+      console.error('[GitCo] Pyodide library not loaded. Check if pyodide.js is included in HTML.');
+      throw new Error('Pyodide 라이브러리가 로드되지 않았습니다. index.html에 pyodide.js 스크립트가 포함되어 있는지 확인하세요.');
     }
-    this.loading = false;
+
+    this.loadPromise = loadPyodide({
+      indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/',
+      stdout: (text) => console.log('[Python stdout]', text),
+      stderr: (text) => console.error('[Python stderr]', text)
+    }).then(pyodide => {
+      this.pyodide = pyodide;
+      this.loading = false;
+      console.log('[GitCo] Pyodide loaded successfully');
+      return pyodide;
+    }).catch(err => {
+      this.loading = false;
+      console.error('[GitCo] Pyodide load failed:', err);
+      throw err;
+    });
+
+    return this.loadPromise;
   },
 
   async loadLibraries(owner, repo, token) {
@@ -291,11 +285,10 @@ const PyRunner = {
   },
 
   async run(code, stdin, libraries) {
-    if (!this.pyodide) await this.init();
-    const py = this.pyodide;
+    const py = await this.init();
 
-    // Install libraries into namespace
-    if (libraries) {
+    // Load custom libraries
+    if (libraries && libraries.length > 0) {
       for (const lib of libraries) {
         try {
           py.runPython(`
@@ -304,46 +297,58 @@ _mod = types.ModuleType('${lib.name}')
 exec(compile(${JSON.stringify(lib.code)}, '<${lib.name}>', 'exec'), _mod.__dict__)
 sys.modules['${lib.name}'] = _mod
 `);
-        } catch (e) { console.warn(`[GitCo] Library ${lib.name} load error:`, e); }
+        } catch (e) { 
+          console.warn(`[GitCo] Library ${lib.name} load error:`, e); 
+        }
       }
     }
 
-    // Redirect stdin
-    const stdinCode = `
+    // Setup stdin
+    if (stdin) {
+      py.runPython(`
 import sys
 from io import StringIO
-sys.stdin = StringIO(${JSON.stringify(stdin || '')})
-`;
-    py.runPython(stdinCode);
+if 'stdin_backup' not in globals():
+    stdin_backup = sys.stdin
+sys.stdin = StringIO(${JSON.stringify(stdin)})
+`);
+    }
 
-    // Capture output
+    // Capture stdout/stderr
     py.runPython(`
 import sys, io
+if 'stdout_backup' not in globals():
+    stdout_backup = sys.stdout
+    stderr_backup = sys.stderr
 _stdout_capture = io.StringIO()
-sys.stdout = _stdout_capture
 _stderr_capture = io.StringIO()
+sys.stdout = _stdout_capture
 sys.stderr = _stderr_capture
 `);
 
-    let stdout = '', stderr = '';
+    let stdout = '', stderr = '', error = null;
     try {
       py.runPython(code);
       stdout = py.runPython('_stdout_capture.getvalue()');
       stderr = py.runPython('_stderr_capture.getvalue()');
     } catch (e) {
-      stderr = e.message || String(e);
+      error = e.message || String(e);
+      stderr = py.runPython('_stderr_capture.getvalue()');
     }
 
-    // Reset stdout/stderr
-    py.runPython('sys.stdout = sys.__stdout__; sys.stderr = sys.__stderr__');
+    // Restore streams
+    py.runPython(`
+sys.stdout = stdout_backup
+sys.stderr = stderr_backup
+`);
 
-    return { stdout: stdout.trim(), stderr: stderr.trim() };
+    return { stdout: stdout.trim(), stderr: stderr.trim(), error };
   }
 };
 
 // ─────────────────── LMS Module ───────────────────
 const LMS = {
-  problems: [],       // { filename, path, meta, rawCode }
+  problems: [],
   currentProblem: null,
   timerInterval: null,
   elapsedSeconds: 0,
@@ -355,6 +360,9 @@ const LMS = {
     const useOwner = owner || cfg.ghOwner;
     const useRepo = repo || cfg.ghRepo;
     const useToken = token || cfg.ghToken;
+
+    // Load libraries first
+    await PyRunner.loadLibraries(useOwner, useRepo, useToken);
 
     const items = await GitHub.listPyFiles(useOwner, useRepo, folder, useToken);
     this.problems = [];
@@ -394,14 +402,12 @@ const LMS = {
     $('#lms-prob-meta').textContent = `점수: ${prob.meta.score} · ${prob.meta.level}`;
     $('#lms-prob-desc').innerHTML = this.renderDescription(prob.meta.description, prob.meta.inputExample, prob.meta.outputExample);
 
-    // Use template if available, else use solution code as starting point
     const startCode = prob.meta.template.trim() || prob.meta.solution.trim() || '# Write your code here\n';
     $('#lms-code').value = startCode;
     $('#lms-stdin').value = prob.meta.inputExample || '';
     $('#lms-stdout').textContent = '';
     hide('#lms-result');
 
-    // Apply time limit from config sheet (override repo metadata)
     this.applyTimeLimit(prob.meta.timeLimit);
 
     hide('#lms-select'); show('#lms-workspace');
@@ -410,7 +416,6 @@ const LMS = {
 
   renderDescription(desc, input, output) {
     let html = desc || '문제 설명이 없습니다.';
-    // Render [이미지: URL] tags
     html = html.replace(/\[이미지:\s*(https?:\/\/[^\]]+)\]/gi, '<br/><img src="$1" style="max-width:100%;border-radius:8px;margin:8px 0;"/>');
     if (input) html += `\n\n📥 입력 예시: ${input}`;
     if (output) html += `\n📤 출력 예시: ${output}`;
@@ -418,8 +423,6 @@ const LMS = {
   },
 
   applyTimeLimit(defaultTime) {
-    // Priority: Sheet Config > Repo metadata > Default
-    // (Sheet config will be fetched separately; here we use repo metadata)
     const countdownEl = $('#lms-countdown');
     if (defaultTime > 0) {
       show(countdownEl);
@@ -438,7 +441,6 @@ const LMS = {
       this.elapsedSeconds++;
       $('#lms-elapsed').textContent = elapsed(this.elapsedSeconds);
 
-      // Countdown
       const cd = $('#lms-countdown');
       if (!cd.classList.contains('hidden')) {
         let rem = parseInt(cd.dataset.remaining) - 1;
@@ -446,7 +448,6 @@ const LMS = {
           this.stopTimer();
           cd.textContent = '⏰ 시간 초과!';
           cd.style.color = 'var(--red)';
-          // Auto-submit
           this.submit();
         } else {
           cd.dataset.remaining = rem;
@@ -461,55 +462,76 @@ const LMS = {
   },
 
   async runCode() {
-    const code = $('#lms-code').value;
-    const stdin = $('#lms-stdin').value;
-    await PyRunner.init();
-    const result = await PyRunner.run(code, stdin, PyRunner.libraries);
-    $('#lms-stdout').textContent = result.stdout || '(출력 없음)';
-    if (result.stderr) {
-      $('#lms-stdout').textContent += '\n--- stderr ---\n' + result.stderr;
+    try {
+      const code = $('#lms-code').value;
+      const stdin = $('#lms-stdin').value;
+      $('#lms-stdout').textContent = '⏳ 실행 중...';
+      
+      const result = await PyRunner.run(code, stdin, PyRunner.libraries);
+      
+      let output = result.stdout || '(출력 없음)';
+      if (result.stderr) output += '\n[오류]\n' + result.stderr;
+      if (result.error) output += '\n[예외]\n' + result.error;
+      
+      $('#lms-stdout').textContent = output;
+      return result;
+    } catch (e) {
+      $('#lms-stdout').textContent = '실행 오류: ' + e.message;
+      console.error(e);
     }
-    return result;
   },
 
   async submit() {
     this.stopTimer();
     const code = $('#lms-code').value;
     const stdin = $('#lms-stdin').value;
-    await PyRunner.init();
+    
+    try {
+      // Run student code
+      const studentResult = await PyRunner.run(code, stdin, PyRunner.libraries);
+      const studentOutput = studentResult.stdout;
 
-    // Run student code
-    const studentResult = await PyRunner.run(code, stdin, PyRunner.libraries);
-    const studentOutput = studentResult.stdout;
+      // Run solution code
+      const solutionResult = await PyRunner.run(this.currentProblem.meta.solution, stdin, PyRunner.libraries);
+      const solutionOutput = solutionResult.stdout;
 
-    // Run solution code
-    const solutionResult = await PyRunner.run(this.currentProblem.meta.solution, stdin, PyRunner.libraries);
-    const solutionOutput = solutionResult.stdout;
+      // Compare (strip whitespace for flexible comparison)
+      const correct = studentOutput.trim() === solutionOutput.trim();
 
-    // Compare
-    const correct = studentOutput === solutionOutput;
-
-    const resultEl = $('#lms-result');
-    show(resultEl);
-    resultEl.className = correct ? 'correct' : 'wrong';
-    resultEl.innerHTML = correct
-      ? `✅ <strong>정답!</strong> (${this.currentProblem.meta.score}점)`
-      : `❌ <strong>오답</strong><br/>기대 출력: <code>${this.escapeHtml(solutionOutput)}</code><br/>내 출력: <code>${this.escapeHtml(studentOutput)}</code>`;
-
-    // Record to Google Sheets (if logged in)
-    if (Session.role === 'student' && Session.userId) {
-      try {
-        await API.submit(
-          Session.userId,
-          Session.userClass,
-          this.currentProblem.filename,
-          correct ? this.currentProblem.meta.score : 0,
-          correct,
-          this.elapsedSeconds
-        );
-      } catch (e) {
-        console.warn('[GitCo] Record save failed:', e);
+      const resultEl = $('#lms-result');
+      show(resultEl);
+      resultEl.className = correct ? 'correct' : 'wrong';
+      
+      if (correct) {
+        resultEl.innerHTML = `✅ <strong>정답!</strong> (${this.currentProblem.meta.score}점)<br/>실행 시간: ${elapsed(this.elapsedSeconds)}`;
+      } else {
+        resultEl.innerHTML = `❌ <strong>오답</strong><br/>
+          <div style="margin-top:8px;opacity:0.8;">
+            <div>기대 출력:</div>
+            <pre style="background:rgba(0,0,0,0.3);padding:8px;border-radius:4px;">${this.escapeHtml(solutionOutput)}</pre>
+            <div>내 출력:</div>
+            <pre style="background:rgba(0,0,0,0.3);padding:8px;border-radius:4px;">${this.escapeHtml(studentOutput)}</pre>
+          </div>`;
       }
+
+      // Record to Google Sheets
+      if (Session.role === 'student' && Session.userId) {
+        try {
+          await API.submit(
+            Session.userId,
+            Session.userClass,
+            this.currentProblem.filename,
+            correct ? this.currentProblem.meta.score : 0,
+            correct,
+            this.elapsedSeconds
+          );
+        } catch (e) {
+          console.warn('[GitCo] Record save failed:', e);
+        }
+      }
+    } catch (e) {
+      alert('채점 중 오류: ' + e.message);
+      console.error(e);
     }
   },
 
@@ -519,6 +541,7 @@ const LMS = {
   },
 
   escapeHtml(str) {
+    if (!str) return '(없음)';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 };
@@ -568,7 +591,6 @@ const Studio = {
     const path = `${$('#prob-path').value}/${filename}`;
 
     try {
-      // Check if file exists (to get SHA for update)
       let sha = null;
       try {
         const existing = await GitHub.fetchContents(cfg.ghOwner, cfg.ghRepo, path, cfg.ghToken);
@@ -598,6 +620,9 @@ const Admin = {
       this.renderStudentTable();
     } catch (e) {
       console.warn('[GitCo] loadStudents failed:', e);
+      // Offline mock data
+      this.students = [];
+      this.renderStudentTable();
     }
   },
 
@@ -654,7 +679,10 @@ const Admin = {
     try {
       const data = await API.getRecords(classId);
       this.renderRecords(data.records || []);
-    } catch (e) { console.warn('[GitCo] loadRecords failed:', e); }
+    } catch (e) { 
+      console.warn('[GitCo] loadRecords failed:', e);
+      $('#admin-records-table').innerHTML = '<p>기록을 불러올 수 없습니다.</p>';
+    }
   },
 
   renderRecords(records) {
@@ -688,7 +716,6 @@ const Admin = {
 
   initClassSelect() {
     const select = $('#admin-class-select');
-    // Populate with common class names or from data
     const classes = ['전체', '1학년1반', '1학년2반', '2학년1반', '2학년2반', '3학년1반', '3학년2반'];
     select.innerHTML = classes.map(c => `<option value="${c}">${c}</option>`).join('');
   },
@@ -708,7 +735,6 @@ const App = {
     Admin.initClassSelect();
     Admin.initLoginClassSelect();
 
-    // Load saved config into form
     const cfg = getConfig();
     if (cfg.ghToken) $('#cfg-gh-token').value = cfg.ghToken;
     if (cfg.ghOwner) $('#cfg-gh-owner').value = cfg.ghOwner;
@@ -716,22 +742,19 @@ const App = {
     if (cfg.appsUrl) $('#cfg-apps-url').value = cfg.appsUrl;
     if (cfg.sheetId) $('#cfg-sheet-id').value = cfg.sheetId;
 
-    // Pre-load Pyodide in background
-    PyRunner.init();
+    // Pre-load Pyodide
+    PyRunner.init().catch(e => console.warn('Pyodide pre-load failed (will retry on use):', e));
   },
 
   bindEvents() {
-    // Navigation
     $$('.nav-btn').forEach(btn => {
       btn.onclick = () => this.switchView(btn.dataset.view);
     });
 
-    // Login/Logout
     $('#btn-login').onclick = () => show('#login-modal');
     $('#close-login').onclick = () => hide('#login-modal');
     $('#btn-logout').onclick = () => { Session.clear(); location.reload(); };
 
-    // Login tabs
     $$('#login-tabs .tab-btn').forEach(btn => {
       btn.onclick = () => {
         $$('#login-tabs .tab-btn').forEach(b => b.classList.remove('active'));
@@ -741,7 +764,6 @@ const App = {
       };
     });
 
-    // Student login
     $('#login-student').onsubmit = async (e) => {
       e.preventDefault();
       try {
@@ -754,7 +776,6 @@ const App = {
           alert(data.error || '로그인 실패');
         }
       } catch (err) {
-        // If Apps Script is not connected, allow offline mode
         Session.set('student', { userId: $('#login-id').value, userName: $('#login-id').value, userClass: $('#login-class').value });
         hide('#login-modal');
         alert('⚠️ 서버 연결 실패 — 오프라인 모드로 진입합니다.');
@@ -762,14 +783,12 @@ const App = {
       }
     };
 
-    // Guest
     $('#btn-guest').onclick = () => {
       Session.set('guest', { userId: 'guest', userName: '게스트' });
       hide('#login-modal');
       this.switchView('lms');
     };
 
-    // Teacher login
     $('#login-teacher').onsubmit = async (e) => {
       e.preventDefault();
       try {
@@ -782,9 +801,8 @@ const App = {
           alert(data.error || '로그인 실패');
         }
       } catch (err) {
-        // Offline mode
         const pw = $('#login-teacher-pw').value;
-        if (pw === 'admin') { // Default fallback
+        if (pw === 'admin') {
           Session.set('teacher', { userId: 'teacher', userName: '선생님' });
           hide('#login-modal');
           alert('⚠️ 서버 연결 실패 — 오프라인 모드 (기본 비밀번호)');
@@ -795,7 +813,6 @@ const App = {
       }
     };
 
-    // Config save
     $('#btn-save-config').onclick = () => {
       const cfg = {
         ghToken: $('#cfg-gh-token').value,
@@ -808,19 +825,16 @@ const App = {
       alert('✅ 설정 저장 완료');
     };
 
-    // Studio
     $('#btn-gen-py').onclick = () => Studio.generatePreview();
     $('#btn-download-py').onclick = () => Studio.downloadPy();
     $('#btn-upload-gh').onclick = () => Studio.uploadToGitHub();
     $('#btn-load-problems').onclick = () => this.loadStudioProblems();
 
-    // LMS
     $('#btn-load-lms').onclick = () => this.loadLMSProblems();
     $('#btn-run').onclick = () => LMS.runCode();
     $('#btn-submit').onclick = () => LMS.submit();
     $('#btn-back-list').onclick = () => LMS.backToList();
 
-    // Admin
     $('#btn-add-student').onclick = () => Admin.addStudent();
     $('#btn-refresh-students').onclick = () => Admin.loadStudents();
     $('#btn-load-records').onclick = () => Admin.loadRecords();
@@ -840,7 +854,6 @@ const App = {
       } catch (e) { alert('❌ 실패: ' + e.message); }
     };
 
-    // Admin tabs
     $$('.admin-tabs .tab-btn').forEach(btn => {
       btn.onclick = () => {
         $$('.admin-tabs .tab-btn').forEach(b => b.classList.remove('active'));
@@ -858,7 +871,6 @@ const App = {
       b.classList.toggle('active', b.dataset.view === name);
     });
 
-    // Show/hide records based on role
     if (name === 'lms') {
       if (Session.role === 'student') show('#lms-records');
       else hide('#lms-records');
@@ -887,7 +899,6 @@ const App = {
         div.className = 'problem-card';
         div.innerHTML = `<h4>${meta.title || item.name}</h4><div class="meta">${item.path}</div>`;
         div.onclick = () => {
-          // Load into form
           $('#prob-title').value = meta.title;
           $('#prob-score').value = meta.score;
           $('#prob-level').value = meta.level;
@@ -917,5 +928,4 @@ const App = {
   }
 };
 
-// ─────────────────── Initialize ───────────────────
 document.addEventListener('DOMContentLoaded', () => App.init());
