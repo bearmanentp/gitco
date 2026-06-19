@@ -588,7 +588,140 @@ function jsonpCall(url, action, data){
 }
 
 // ---- Apps Script 코드 표시 ----
-const APPS_SCRIPT_CODE=`function initialSetup(){ ... 아래에 전체 Code.gs 붙여넣기 ... }`;
+const APPS_SCRIPT_CODE=`// ============================================
+// GitCo — Google Apps Script
+// (Google Sheets → 확장 프로그램 → Apps Script에 붙여넣기)
+// ============================================
+
+function doGet(e){
+  const action=(e.parameter.action||'').trim();
+  const callback=(e.parameter.callback||'').trim();
+  let data={};
+  try{ data=e.parameter.data? JSON.parse(e.parameter.data):{}; }catch{ data={}; }
+  const result=dispatch(action,data);
+  return respond(result, callback);
+}
+function doPost(e){
+  let data={};
+  try{ data=e.postData&&e.postData.contents? JSON.parse(e.postData.contents):{}; }catch{ data={}; }
+  return respond(dispatch((data.action||'').trim(), data), '');
+}
+
+function dispatch(action, data){
+  try{
+    switch(action){
+      case 'loginTeacher': return handleLoginTeacher(data);
+      case 'addStudent': return handleAddStudent(data);
+      case 'generateAccounts': return handleGenerateAccounts(data);
+      case 'changeTeacherPassword': return handleChangeTeacherPassword(data);
+      case 'submit': return handleSubmit(data);
+      default: return { success:false, error:'Unknown action: '+action };
+    }
+  }catch(e){ return { success:false, error:e.message }; }
+}
+
+function respond(obj, callback){
+  const json=JSON.stringify(obj);
+  if(callback && /^[A-Za-z_$][\w$]*$/.test(callback)){
+    return ContentService.createTextOutput(callback+'('+json+');').setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---- 시트 헬퍼 ----
+function ensureSheet(name, headers){
+  const ss=SpreadsheetApp.getActiveSpreadsheet();
+  let sh=ss.getSheetByName(name);
+  if(!sh) sh=ss.insertSheet(name);
+  if(sh.getLastRow()===0 && headers) sh.appendRow(headers);
+  return sh;
+}
+function findRow(sheet, col, val){
+  const d=sheet.getDataRange().getValues();
+  for(let i=1;i<d.length;i++) if(String(d[i][col])===String(val)) return i+1;
+  return 0;
+}
+function sha256_(text){
+  const b=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8);
+  return b.map(x=>((x+256)%256).toString(16).padStart(2,'0')).join('');
+}
+
+// ---- 선생님 ----
+function getConfig_(){
+  const sh=ensureSheet('Config',['Key','Value']);
+  const d=sh.getDataRange().getValues();
+  const m={};
+  for(let i=1;i<d.length;i++) m[String(d[i][0])]=d[i][1];
+  if(!m.teacherPasswordHash) m.teacherPasswordHash=sha256_('admin');
+  return m;
+}
+function setConfig_(k,v){
+  const sh=ensureSheet('Config',['Key','Value']);
+  const r=findRow(sh,0,k);
+  if(r) sh.getRange(r,2).setValue(v); else sh.appendRow([k,v]);
+}
+function handleLoginTeacher(data){
+  const cfg=getConfig_();
+  if(String(data.passwordHash||'') !== String(cfg.teacherPasswordHash||'')) return { success:false, error:'비밀번호 불일치' };
+  return { success:true, role:'teacher' };
+}
+function handleChangeTeacherPassword(data){
+  setConfig_('teacherPasswordHash', String(data.passwordHash||''));
+  return { success:true };
+}
+
+// ---- 학생 ----
+function handleAddStudent(data){
+  const sh=ensureSheet('Students',['UserId','Name','ClassId','PasswordHash']);
+  if(findRow(sh,0,data.userId)) return { success:false, error:'이미 있는 학번' };
+  sh.appendRow([data.userId, data.name||'', data.classId||'', data.passwordHash||'']);
+  return { success:true };
+}
+function handleGenerateAccounts(data){
+  const sh=ensureSheet('Students',['UserId','Name','ClassId','PasswordHash']);
+  const prefix=data.prefix||'S';
+  const count=parseInt(data.count)||0;
+  const start=parseInt(data.startNo)||1;
+  const out=[];
+  for(let i=0;i<count;i++){
+    const uid=prefix+String(start+i).padStart(3,'0');
+    if(findRow(sh,0,uid)) continue;
+    const pw=makePw_(8);
+    sh.appendRow([uid,'', data.classId||'기본', sha256_(pw)]);
+    out.push({ userId:uid, password:pw });
+  }
+  return { success:true, accounts:out };
+}
+function makePw_(len){
+  const c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let r=''; for(let i=0;i<len;i++) r+=c[Math.floor(Math.random()*c.length)];
+  return r;
+}
+
+// ---- 기록 ----
+function handleSubmit(data){
+  const sh=ensureSheet('Records',['Timestamp','StudentId','StudentName','ClassId','Repo','Problem','ProblemPath','Result','Score','MaxScore','Code']);
+  sh.appendRow([
+    data.timestamp||new Date().toISOString(),
+    data.studentId||'', data.studentName||'', data.classId||'',
+    data.repo||'', data.problem||'', data.problemPath||'',
+    data.result||'', data.score||0, data.maxScore||0,
+    String(data.code||'').slice(0,50000)
+  ]);
+  return { success:true };
+}
+
+// ---- 초기 설정 ----
+function onOpen(){
+  SpreadsheetApp.getUi().createMenu('⚡ GitCo').addItem('초기 설정 실행','initialSetup').addToUi();
+}
+function initialSetup(){
+  ensureSheet('Config',['Key','Value']);
+  ensureSheet('Students',['UserId','Name','ClassId','PasswordHash']);
+  ensureSheet('Records',['Timestamp','StudentId','StudentName','ClassId','Repo','Problem','ProblemPath','Result','Score','MaxScore','Code']);
+  setConfig_('teacherPasswordHash', sha256_('admin'));
+  SpreadsheetApp.getActive().toast('GitCo 초기 설정 완료! 관리자 비밀번호: admin');
+}`;
 
 function showScript(){
   $('scriptCode').textContent=APPS_SCRIPT_CODE;
