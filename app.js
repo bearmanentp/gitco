@@ -1,197 +1,270 @@
-// ============================================
-// GitCo - 완전 통합 (복붙용)
-// ============================================
+'use strict';
 
-// --- 상태 ---
-const state = {
+// =============================================
+// GitCo app.js
+// 개발: 석근우 (geunman@geekbyte.kro.kr)
+// =============================================
+
+// --- 전역 상태 ---
+const App = {
     config: { appsUrl: '', defaultRepo: '' },
     session: { role: 'guest', userId: '', userName: '게스트', classId: '' },
-    repo: { owner: '', repo: '', branch: 'main', folder: 'problems', libFolder: 'libraries', repos: [], problems: [], current: null },
+    problems: [],
+    currentProblem: null,
     records: [],
     pyodide: null,
     pyodideReady: false,
-    studentRecords: [],
-    allRecords: []
+    timerID: null,
+    repoInfo: { owner: '', repo: '', branch: 'main', folder: 'problems' }
 };
 
-// --- DOM 헬퍼 ---
-const $ = s => document.querySelector(s);
-const $$ = s => document.querySelectorAll(s);
-
-function show(el) { const e = typeof el === 'string' ? $(el) : el; if (e) e.classList.remove('hidden'); }
-function hide(el) { const e = typeof el === 'string' ? $(el) : el; if (e) e.classList.add('hidden'); }
+// --- DOM 유틸 ---
+function el(id) { return document.getElementById(id); }
+function show(id) { const e = el(id); if (e) e.style.display = ''; }
+function hide(id) { const e = el(id); if (e) e.style.display = 'none'; }
+function val(id) { const e = el(id); return e ? e.value.trim() : ''; }
+function setVal(id, v) { const e = el(id); if (e) e.value = v; }
+function setText(id, v) { const e = el(id); if (e) e.textContent = v; }
+function setHtml(id, v) { const e = el(id); if (e) e.innerHTML = v; }
 
 function toast(msg, type = 'info') {
-    const el = document.createElement('div');
-    el.className = `toast ${type}`;
-    el.textContent = msg;
-    const c = $('#toastContainer');
-    c.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
+    const box = el('toasts');
+    if (!box) return;
+    const d = document.createElement('div');
+    d.className = 'toast' + (type === 'ok' ? ' ok' : type === 'fail' ? ' fail' : '');
+    d.textContent = msg;
+    box.appendChild(d);
+    setTimeout(() => d.remove(), 3000);
 }
 
-function showLoading(t = '처리 중...') { $('#loadingText').textContent = t; show('#loadingOverlay'); }
-function hideLoading() { hide('#loadingOverlay'); }
-
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-
-function formatTime(s) {
-    s = Math.max(0, parseInt(s) || 0);
-    return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+function showLoading(msg = '처리 중...') {
+    const ov = el('loading');
+    if (ov) { setText('loadingMsg', msg); ov.style.display = 'flex'; }
+}
+function hideLoading() {
+    const ov = el('loading');
+    if (ov) ov.style.display = 'none';
 }
 
-function btoaU(s) { return btoa(new TextEncoder().encode(s).reduce((a, b) => a + String.fromCharCode(b), '')); }
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = String(s ?? '');
+    return d.innerHTML;
+}
+
+function fmtTime(sec) {
+    sec = Math.max(0, parseInt(sec) || 0);
+    return `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+function btoaU(s) {
+    const bytes = new TextEncoder().encode(s);
+    let bin = '';
+    bytes.forEach(b => bin += String.fromCharCode(b));
+    return btoa(bin);
+}
+
 function atobU(s) {
-    try { return new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0))); } catch { return atob(s); }
+    try {
+        const bin = atob(String(s).replace(/\s/g, ''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new TextDecoder().decode(bytes);
+    } catch {
+        return atob(s);
+    }
 }
 
 async function sha256(text) {
-    const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-    return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function mdRender(text) {
-    let t = String(text || '');
-    t = t.replace(/\[이미지:\s*(https?:\/\/[^\]]+)\]/gi, '<img src="$1" alt="img" loading="lazy" style="max-width:100%">');
-    if (typeof marked !== 'undefined') {
-        try { t = marked.parse(t, { breaks: true, gfm: true }); } catch {}
-    } else { t = t.replace(/\n/g, '<br>'); }
+    if (!text) return '';
+    let t = String(text)
+        .replace(/\[이미지:\s*(https?:\/\/[^\]]+)\]/gi, '<img src="$1" alt="img" loading="lazy">');
+    try {
+        if (typeof marked !== 'undefined') t = marked.parse(t, { breaks: true, gfm: true });
+        else t = t.replace(/\n/g, '<br>');
+    } catch { t = t.replace(/\n/g, '<br>'); }
     return t;
 }
 
-function parseRepo(s) {
-    const raw = String(s || '').trim();
-    const m = raw.match(/github\.com\/([^/]+)\/([^/]+)/i);
-    if (m) return { owner: m[1], repo: m[2].replace(/\.git$/, '') };
-    const p = raw.split('/').filter(Boolean);
-    if (p.length >= 2) return { owner: p[0], repo: p[1].replace(/\.git$/, '') };
+function parseRepoInput(raw) {
+    raw = String(raw ?? '').trim();
+    const urlM = raw.match(/github\.com\/([^/\s]+)\/([^/\s]+)/i);
+    if (urlM) return { owner: urlM[1], repo: urlM[2].replace(/\.git$/, '') };
+    const parts = raw.split('/').filter(Boolean);
+    if (parts.length >= 2) return { owner: parts[0], repo: parts[1].replace(/\.git$/, '') };
     return null;
 }
 
-// --- 토큰 (localStorage에 저장/로드) ---
-function getToken() { return localStorage.getItem('gitco_token') || $('#repoToken').value.trim(); }
-function setToken(t) { localStorage.setItem('gitco_token', t || ''); }
-
-// --- 설정 ---
+// --- 설정 저장/로드 ---
 function saveConfig() {
-    state.config.appsUrl = $('#cfgAppsUrl').value.trim();
-    state.config.defaultRepo = $('#cfgDefaultRepo').value.trim();
-    localStorage.setItem('gitco_config', JSON.stringify(state.config));
-    toast('설정 저장 완료', 'success');
+    App.config.appsUrl = val('inAppsUrl');
+    App.config.defaultRepo = val('inDefaultRepo');
+    localStorage.setItem('gitco_cfg', JSON.stringify(App.config));
+    toast('설정이 저장되었습니다', 'ok');
 }
+
 function loadConfig() {
     try {
-        const c = JSON.parse(localStorage.getItem('gitco_config') || '{}');
-        state.config = { ...{ appsUrl: '', defaultRepo: '' }, ...c };
-    } catch {}
-    $('#cfgAppsUrl').value = state.config.appsUrl;
-    $('#cfgDefaultRepo').value = state.config.defaultRepo;
+        const c = JSON.parse(localStorage.getItem('gitco_cfg') || '{}');
+        App.config = { appsUrl: '', defaultRepo: '', ...c };
+    } catch {
+        App.config = { appsUrl: '', defaultRepo: '' };
+    }
+    setVal('inAppsUrl', App.config.appsUrl);
+    setVal('inDefaultRepo', App.config.defaultRepo);
+    if (App.config.defaultRepo) setVal('inDirect', App.config.defaultRepo);
+}
+
+// --- 세션 UI 업데이트 ---
+function updateSessionUI() {
+    const label = el('userLabel');
+    const logoutBtn = el('btnLogout');
+    if (label) {
+        label.textContent = App.session.role === 'guest'
+            ? '게스트'
+            : `${App.session.userName || App.session.userId} (${App.session.role === 'teacher' ? '선생님' : '학생'})`;
+    }
+    if (logoutBtn) {
+        logoutBtn.style.display = (App.session.role !== 'guest') ? '' : 'none';
+    }
 }
 
 // --- 페이지 전환 ---
 function switchPage(page) {
-    $$('.page').forEach(p => p.classList.remove('active'));
-    $(`#page-${page}`).classList.add('active');
-    $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const target = el(`page-${page}`);
+    if (target) target.classList.add('active');
+    document.querySelectorAll('.nav-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.page === page);
+    });
+    if (page === 'records') loadRecords();
 }
 
-// --- GitHub API (토큰 없어도 공개 저장소 접근 가능) ---
-const GitHub = {
+// --- GitHub API ---
+const GH = {
     base: 'https://api.github.com',
-    async request(path, token = '') {
+
+    async req(path, token) {
         const headers = { Accept: 'application/vnd.github+json' };
         if (token) headers.Authorization = `Bearer ${token}`;
-        const res = await fetch(`${this.base}${path}`, { headers });
+        const res = await fetch(this.base + path, { headers });
         const txt = await res.text();
-        if (!res.ok) throw new Error(`GitHub 오류: ${txt || res.status}`);
-        return txt ? JSON.parse(txt) : null;
+        if (!res.ok) throw new Error(`GitHub 오류 ${res.status}: ${txt.slice(0, 200)}`);
+        return txt ? JSON.parse(txt) : {};
     },
-    async searchRepos(query, token) {
-        const data = await this.request(`/search/repositories?q=${encodeURIComponent(query)}&per_page=30&sort=stars&order=desc`, token);
+
+    async defaultBranch(owner, repo, token) {
+        try {
+            const info = await this.req(`/repos/${enc(owner)}/${enc(repo)}`, token);
+            return info.default_branch || 'main';
+        } catch { return 'main'; }
+    },
+
+    async search(query, token) {
+        const data = await this.req(
+            `/search/repositories?q=${encodeURIComponent(query)}&per_page=30&sort=stars&order=desc`,
+            token
+        );
         return data.items || [];
     },
-    async listUserRepos(username, token) {
-        if (token) return await this.request('/user/repos?per_page=100&visibility=all&sort=updated', token);
-        return await this.request(`/users/${encodeURIComponent(username)}/repos?per_page=100&type=owner&sort=updated`);
+
+    async userRepos(username, token) {
+        if (token) {
+            return await this.req('/user/repos?per_page=100&visibility=all&sort=updated', token);
+        }
+        return await this.req(`/users/${enc(username)}/repos?per_page=100&type=owner&sort=updated`);
     },
-    async listContents(owner, repo, path = '', branch = '', token) {
-        const ref = branch ? `?ref=${encodeURIComponent(branch)}` : '';
-        const p = path ? '/' + path.split('/').map(encodeURIComponent).join('/') : '';
-        return await this.request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents${p}${ref}`, token);
+
+    async contents(owner, repo, path, branch, token) {
+        const p = path ? '/' + path.split('/').map(enc).join('/') : '';
+        const q = branch ? `?ref=${enc(branch)}` : '';
+        return await this.req(`/repos/${enc(owner)}/${enc(repo)}/contents${p}${q}`, token);
     },
-    async fetchFile(owner, repo, path, branch, token) {
-        const data = await this.listContents(owner, repo, path, branch, token);
-        if (Array.isArray(data)) throw new Error('파일이 아닙니다');
-        if (data.content) return atobU(data.content);
-        if (data.download_url) {
-            const r = await fetch(data.download_url);
+
+    async fileText(owner, repo, path, branch, token) {
+        const d = await this.contents(owner, repo, path, branch, token);
+        if (Array.isArray(d)) throw new Error(`${path} 는 폴더입니다`);
+        if (d.content) return atobU(d.content);
+        if (d.download_url) {
+            const r = await fetch(d.download_url);
+            if (!r.ok) throw new Error('다운로드 실패');
             return await r.text();
         }
-        throw new Error('파일을 읽을 수 없습니다');
+        throw new Error('파일 내용을 읽을 수 없습니다');
     },
-    async walkPyFiles(owner, repo, path, branch, token, acc = []) {
-        let items = await this.listContents(owner, repo, path, branch, token);
+
+    async walkPy(owner, repo, folder, branch, token, acc) {
+        if (!acc) acc = [];
+        let items;
+        try { items = await this.contents(owner, repo, folder, branch, token); }
+        catch { return acc; }
         if (!Array.isArray(items)) items = [items];
         for (const item of items) {
             if (item.type === 'file' && item.name.endsWith('.py')) acc.push(item);
-            else if (item.type === 'dir') await this.walkPyFiles(owner, repo, item.path, branch, token, acc);
+            else if (item.type === 'dir') await this.walkPy(owner, repo, item.path, branch, token, acc);
         }
         return acc;
-    },
-    async getDefaultBranch(owner, repo, token) {
-        try {
-            const info = await this.request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, token);
-            return info.default_branch || 'main';
-        } catch { return 'main'; }
     }
 };
 
+function enc(s) { return encodeURIComponent(String(s ?? '')); }
+
 // --- Pyodide ---
 async function initPyodide() {
-    if (state.pyodide) return;
+    if (App.pyodide) return;
     try {
-        state.pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.0/full/' });
-        state.pyodideReady = true;
-        toast('Python 실행 준비 완료', 'success');
+        setText('pyStatus', 'Python 로딩중...');
+        App.pyodide = await loadPyodide({
+            indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.0/full/'
+        });
+        App.pyodideReady = true;
+        const s = el('pyStatus');
+        if (s) { s.textContent = '🟢 Python 준비됨'; s.className = 'py-status ready'; }
+        toast('Python 실행 환경 준비 완료', 'ok');
     } catch (e) {
-        toast('Python 로딩 실패: ' + e.message, 'error');
+        setText('pyStatus', '❌ Python 로딩 실패');
+        toast('Pyodide 로딩 실패: ' + e.message, 'fail');
     }
 }
 
-async function runPython(code, inputText = '', timeout = 10000) {
-    if (!state.pyodide) await initPyodide();
-    const py = state.pyodide;
+async function runPython(code, stdin = '', timeoutMs = 10000) {
+    if (!App.pyodide) throw new Error('Python이 아직 준비되지 않았습니다');
     const wrapped = `
-import sys, io
-_old_out, _old_err = sys.stdout, sys.stderr
-_old_in = sys.stdin
-_out, _err = io.StringIO(), io.StringIO()
-sys.stdout, sys.stderr = _out, _err
-sys.stdin = io.StringIO(${JSON.stringify(inputText || '')})
+import sys, io, traceback as _tb
+_oi, _oe, _oin = sys.stdout, sys.stderr, sys.stdin
+sys.stdout = io.StringIO()
+sys.stderr = io.StringIO()
+sys.stdin  = io.StringIO(${JSON.stringify(stdin || '')})
 try:
-    exec(compile(${JSON.stringify(code)}, '<code>', 'exec'), {}, {})
+    exec(compile(${JSON.stringify(code)}, '<code>', 'exec'), {})
 except Exception:
-    import traceback; traceback.print_exc()
-sys.stdout, sys.stderr = _old_out, _old_err
-sys.stdin = _old_in
-_out.getvalue(), _err.getvalue()
+    _tb.print_exc()
+_o = sys.stdout.getvalue()
+_e = sys.stderr.getvalue()
+sys.stdout, sys.stderr, sys.stdin = _oi, _oe, _oin
+(_o, _e)
 `;
-    const res = await Promise.race([
-        py.runPythonAsync(wrapped),
-        new Promise((_, rej) => setTimeout(() => rej(new Error(`실행 시간 초과 (${timeout/1000}초)`)), timeout))
+    const result = await Promise.race([
+        App.pyodide.runPythonAsync(wrapped),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`시간 초과 (${timeoutMs / 1000}초)`)), timeoutMs))
     ]);
-    return { stdout: String(res[0] || ''), stderr: String(res[1] || '') };
+    return { stdout: String(result[0] || ''), stderr: String(result[1] || '') };
 }
 
-async function loadLibraries(owner, repo, folder, branch, token) {
+async function loadLibs(owner, repo, folder, branch, token) {
     if (!folder || !owner || !repo) return;
     try {
-        const files = await GitHub.walkPyFiles(owner, repo, folder, branch, token);
-        for (const file of files) {
-            const code = await GitHub.fetchFile(owner, repo, file.path, branch, token);
-            const name = file.name.replace(/\.py$/i, '').replace(/[^A-Za-z0-9_]/g, '_');
-            if (name && state.pyodide) {
-                state.pyodide.runPython(`
+        const files = await GH.walkPy(owner, repo, folder, branch, token);
+        for (const f of files) {
+            const code = await GH.fileText(owner, repo, f.path, branch, token);
+            const name = f.name.replace(/\.py$/i, '').replace(/[^A-Za-z0-9_]/g, '_');
+            if (name && App.pyodide) {
+                App.pyodide.runPython(`
 import sys, types
 _m = types.ModuleType(${JSON.stringify(name)})
 exec(compile(${JSON.stringify(code)}, '<${name}>', 'exec'), _m.__dict__)
@@ -199,496 +272,692 @@ sys.modules[${JSON.stringify(name)}] = _m
 `);
             }
         }
-    } catch {}
+    } catch (e) {
+        console.warn('라이브러리 로드 실패:', e.message);
+    }
 }
 
 // --- 문제 파싱 ---
 function parseProblem(path, content) {
     const lines = String(content || '').split('\n');
-    const meta = {
-        path, title: '', score: 10, difficulty: '보통',
-        timeLimit: 0, inputEx: '', outputEx: '',
-        description: '', answerCode: '', templateCode: '',
-        libraries: ''
+    const m = {
+        path, repo: `${App.repoInfo.owner}/${App.repoInfo.repo}`,
+        title: '', score: 10, difficulty: '보통', timeLimit: 0,
+        inputEx: '', outputEx: '', description: '',
+        answer: '', template: ''
     };
+
     let inDesc = false;
     for (const l of lines) {
         const t = l.trim();
         if (t === '# ===학생코드===' || t === '# ===정답코드===') break;
         if (inDesc) {
-            if (t.startsWith('#')) { meta.description += '\n' + t.replace(/^#\s?/, ''); continue; }
-            else inDesc = false;
+            if (t.startsWith('#')) { m.description += '\n' + t.replace(/^#\s?/, ''); continue; }
+            inDesc = false;
         }
         if (!t.startsWith('#')) continue;
         const raw = t.replace(/^#\s?/, '');
-        const idx = raw.indexOf(':');
-        if (idx < 0) continue;
-        const k = raw.slice(0, idx).trim(), v = raw.slice(idx + 1).trim();
-        switch (k) {
-            case '문제': meta.title = v; break;
-            case '점수': meta.score = parseInt(v) || 10; break;
-            case '난이도': meta.difficulty = v; break;
-            case '시간제한': meta.timeLimit = parseInt(v) || 0; break;
-            case '입력예시': meta.inputEx = v; break;
-            case '출력예시': meta.outputEx = v; break;
-            case '라이브러리': meta.libraries = v; break;
-            case '설명': meta.description = v; inDesc = true; break;
-        }
+        const ci = raw.indexOf(':');
+        if (ci < 0) continue;
+        const k = raw.slice(0, ci).trim(), v = raw.slice(ci + 1).trim();
+        if (k === '문제') m.title = v;
+        else if (k === '점수') m.score = parseInt(v) || 10;
+        else if (k === '난이도') m.difficulty = v;
+        else if (k === '시간제한') m.timeLimit = parseInt(v) || 0;
+        else if (k === '입력예시') m.inputEx = v;
+        else if (k === '출력예시') m.outputEx = v;
+        else if (k === '설명') { m.description = v; inDesc = true; }
     }
-    const sm = lines.findIndex(l => l.trim() === '# ===학생코드===');
-    const am = lines.findIndex(l => l.trim() === '# ===정답코드===');
-    if (sm >= 0) meta.templateCode = lines.slice(sm + 1, am > sm ? am : lines.length).join('\n').trim();
-    if (am >= 0) meta.answerCode = lines.slice(am + 1).join('\n').trim();
-    if (!meta.templateCode) meta.templateCode = '# 여기에 코드를 작성하세요';
-    if (!meta.answerCode) meta.answerCode = meta.templateCode;
-    if (!meta.title) meta.title = path.split('/').pop().replace('.py', '');
-    return meta;
+
+    const si = lines.findIndex(l => l.trim() === '# ===학생코드===');
+    const ai = lines.findIndex(l => l.trim() === '# ===정답코드===');
+    if (si >= 0) m.template = lines.slice(si + 1, ai > si ? ai : undefined).join('\n').trim();
+    if (ai >= 0) m.answer = lines.slice(ai + 1).join('\n').trim();
+    if (!m.template) m.template = '# 여기에 코드를 작성하세요';
+    if (!m.answer) m.answer = m.template;
+    if (!m.title) m.title = path.split('/').pop().replace(/\.py$/i, '');
+    return m;
 }
 
-// --- 저장소 검색/로드 ---
+// --- 저장소 검색 ---
 async function searchRepos() {
-    const query = $('#repoQuery').value.trim();
-    const token = getToken();
-    if (!query) return toast('사용자명 또는 검색어를 입력하세요', 'warning');
+    const query = val('inQuery');
+    const token = val('inToken');
+    if (!query) return toast('사용자명 또는 검색어를 입력하세요', 'fail');
     showLoading('저장소 검색 중...');
     try {
         let repos;
-        if (token) repos = await GitHub.listUserRepos(query, token);
-        else repos = await GitHub.searchRepos(query, token);
-        state.repo.repos = repos;
-        const sel = $('#repoSelect');
-        sel.innerHTML = '';
-        sel.disabled = false;
-        if (!repos.length) {
-            sel.innerHTML = '<option value="">결과 없음</option>';
-            toast('검색 결과가 없습니다', 'warning');
+        if (token) {
+            repos = await GH.userRepos(query, token);
         } else {
-            repos.forEach(r => {
-                const o = document.createElement('option');
-                o.value = r.full_name;
-                o.dataset.owner = r.owner.login;
-                o.dataset.repo = r.name;
-                o.dataset.branch = r.default_branch || 'main';
-                o.textContent = `${r.full_name} ${r.private ? '(private)' : '(public)'}`;
-                sel.appendChild(o);
-            });
-            toast(`${repos.length}개 저장소 발견`, 'success');
-            $('#btnLoadSelected').disabled = false;
+            repos = await GH.search(query, token);
         }
+        fillRepoSelect(repos);
         hideLoading();
-    } catch (e) { hideLoading(); toast('검색 실패: ' + e.message, 'error'); }
+        toast(`${repos.length}개 저장소 발견`, 'ok');
+    } catch (e) {
+        hideLoading();
+        toast('검색 실패: ' + e.message, 'fail');
+    }
 }
 
-async function loadDirect() {
-    const input = $('#repoDirect').value.trim();
-    const p = parseRepo(input);
-    if (!p) return toast('owner/repo 또는 GitHub URL 형식으로 입력하세요', 'warning');
-    const token = getToken();
-    const branch = await GitHub.getDefaultBranch(p.owner, p.repo, token);
-    const folder = $('#repoFolder').value.trim() || 'problems';
-    const libFolder = $('#libFolder').value.trim() || 'libraries';
-    await loadRepo(p.owner, p.repo, branch, folder, libFolder, token);
+function fillRepoSelect(repos) {
+    const sel = el('repoSelect');
+    sel.innerHTML = '';
+    if (!repos || !repos.length) {
+        sel.innerHTML = '<option value="">결과 없음</option>';
+        el('btnLoadSelected').disabled = true;
+        return;
+    }
+    repos.forEach(r => {
+        const o = document.createElement('option');
+        o.value = r.full_name;
+        o.dataset.owner = r.owner.login;
+        o.dataset.repo = r.name;
+        o.dataset.branch = r.default_branch || 'main';
+        o.textContent = r.full_name + (r.private ? ' (private)' : ' (public)');
+        sel.appendChild(o);
+    });
+    el('btnLoadSelected').disabled = false;
 }
 
-async function loadSelected() {
-    const sel = $('#repoSelect');
+async function loadSelectedRepo() {
+    const sel = el('repoSelect');
     const opt = sel.options[sel.selectedIndex];
-    if (!opt || !opt.dataset.owner) return toast('저장소를 선택하세요', 'warning');
-    const token = getToken();
-    const branch = $('#repoFolder').value.trim() ? (opt.dataset.branch || 'main') : opt.dataset.branch || 'main';
-    const folder = $('#repoFolder').value.trim() || 'problems';
-    const libFolder = $('#libFolder').value.trim() || 'libraries';
-    state.repo.branch = branch;
+    if (!opt || !opt.dataset.owner) return toast('저장소를 선택하세요', 'fail');
+    const token = val('inToken');
+    const branch = opt.dataset.branch || 'main';
+    const folder = val('inFolder') || 'problems';
+    const libFolder = val('inLibFolder') || 'libraries';
     await loadRepo(opt.dataset.owner, opt.dataset.repo, branch, folder, libFolder, token);
 }
 
-async function loadRepo(owner, repo, branch, folder, libFolder, token) {
-    showLoading('문제 불러오는 중...');
-    try {
-        await initPyodide();
-        await loadLibraries(owner, repo, libFolder, branch, token);
-        state.repo.owner = owner; state.repo.repo = repo; state.repo.folder = folder;
-        const files = await GitHub.walkPyFiles(owner, repo, folder, branch, token);
-        const problems = [];
-        for (const f of files) {
-            const content = await GitHub.fetchFile(owner, repo, f.path, branch, token);
-            const meta = parseProblem(f.path, content);
-            meta.repo = `${owner}/${repo}`;
-            meta.branch = branch;
-            problems.push(meta);
-        }
-        state.repo.problems = problems;
-        renderProblemList();
-        hideLoading();
-        toast(`${problems.length}개 문제 로드 완료`, 'success');
-    } catch (e) { hideLoading(); toast('로드 실패: ' + e.message, 'error'); }
+async function loadDirect() {
+    const input = val('inDirect');
+    const parsed = parseRepoInput(input);
+    if (!parsed) return toast('owner/repo 또는 GitHub URL 형식으로 입력하세요', 'fail');
+    const token = val('inToken');
+    showLoading('브랜치 확인 중...');
+    const branch = await GH.defaultBranch(parsed.owner, parsed.repo, token);
+    const folder = val('inFolder') || 'problems';
+    const libFolder = val('inLibFolder') || 'libraries';
+    await loadRepo(parsed.owner, parsed.repo, branch, folder, libFolder, token);
 }
 
+async function loadRepo(owner, repo, branch, folder, libFolder, token) {
+    showLoading(`${owner}/${repo} 불러오는 중...`);
+    try {
+        await initPyodide();
+        App.repoInfo = { owner, repo, branch, folder };
+
+        // 라이브러리 로드
+        if (libFolder) await loadLibs(owner, repo, libFolder, branch, token);
+
+        // 문제 파일 목록
+        const files = await GH.walkPy(owner, repo, folder, branch, token);
+        if (!files.length) {
+            hideLoading();
+            toast(`'${folder}' 폴더에 .py 파일이 없습니다`, 'fail');
+            return;
+        }
+
+        App.problems = [];
+        for (const f of files) {
+            const content = await GH.fileText(owner, repo, f.path, branch, token);
+            const p = parseProblem(f.path, content);
+            App.problems.push(p);
+        }
+
+        renderProblemList();
+        hideLoading();
+        toast(`${App.problems.length}개 문제 로드 완료`, 'ok');
+    } catch (e) {
+        hideLoading();
+        toast('로드 실패: ' + e.message, 'fail');
+    }
+}
+
+// --- 문제 목록 렌더링 ---
 function renderProblemList() {
-    const list = $('#problemList');
-    const count = $('#problemCount');
-    const ps = state.repo.problems;
-    if (!ps || !ps.length) {
-        list.innerHTML = '<p class="empty-text">문제가 없습니다</p>';
-        list.classList.add('empty');
-        count.textContent = '';
+    const box = el('problemList');
+    setText('problemCount', `(${App.problems.length}개)`);
+    if (!App.problems.length) {
+        box.innerHTML = '<p class="empty-msg">문제가 없습니다.</p>';
         return;
     }
-    list.classList.remove('empty');
-    count.textContent = `총 ${ps.length}개 문제`;
-    list.innerHTML = ps.map((p, i) => {
-        const active = state.repo.current && state.repo.current.path === p.path ? 'active' : '';
-        const diffClass = p.difficulty === '쉬움' ? 'badge-easy' : p.difficulty === '어려움' ? 'badge-hard' : 'badge-medium';
-        return `<div class="problem-item ${active}" data-idx="${i}">
-            <span class="title">${esc(p.title)}</span>
-            <span class="score">${p.score}점</span>
-            <span class="badge ${diffClass}">${esc(p.difficulty)}</span>
+    box.innerHTML = App.problems.map((p, i) => {
+        const active = App.currentProblem && App.currentProblem.path === p.path ? ' active' : '';
+        const dcls = p.difficulty === '쉬움' ? 'diff-easy' : p.difficulty === '어려움' ? 'diff-hard' : 'diff-mid';
+        return `<div class="prob-item${active}" data-idx="${i}">
+            <span class="p-title">${esc(p.title)}</span>
+            <span class="p-score">${p.score}점</span>
+            <span class="${dcls}">${esc(p.difficulty)}</span>
         </div>`;
     }).join('');
-    $$('.problem-item').forEach(el => {
-        el.onclick = () => selectProblem(parseInt(el.dataset.idx));
+    box.querySelectorAll('.prob-item').forEach(item => {
+        item.addEventListener('click', () => selectProblem(parseInt(item.dataset.idx)));
     });
 }
 
+// --- 문제 선택 ---
 function selectProblem(idx) {
-    const p = state.repo.problems[idx];
+    const p = App.problems[idx];
     if (!p) return;
-    state.repo.current = p;
+    App.currentProblem = p;
     renderProblemList();
     renderProblemDetail(p);
 }
 
+// --- 문제 상세 렌더링 ---
 function renderProblemDetail(p) {
-    const area = $('#detailArea');
-    const tl = p.timeLimit || '제한 없음';
-    area.innerHTML = `
-        <div class="problem-header">
+    const main = el('lmsMain');
+    const tl = p.timeLimit ? `${p.timeLimit}초` : '제한 없음';
+    main.innerHTML = `
+        <div class="card prob-detail">
             <h2>${esc(p.title)}</h2>
-            <div class="meta-info">점수: ${p.score} · 난이도: ${esc(p.difficulty)} · 시간: ${tl}</div>
+            <div class="prob-meta">
+                점수: <strong>${p.score}</strong> &nbsp;·&nbsp;
+                난이도: <strong>${esc(p.difficulty)}</strong> &nbsp;·&nbsp;
+                시간: <strong>${tl}</strong>
+            </div>
+            <div class="prob-body">${mdRender(p.description || '설명이 없습니다.')}</div>
+            <div class="form-group">
+                <label>입력 (stdin)</label>
+                <textarea id="codeStdin" class="inp ta" rows="2">${esc(p.inputEx)}</textarea>
+            </div>
+            <div class="code-editor-wrap">
+                <div class="code-toolbar">
+                    <span>🐍 Python</span>
+                    <div style="display:flex;gap:8px">
+                        <button id="btnResetCode" class="btn">↩ 초기화</button>
+                        <button id="btnRun" class="btn">▶ 실행</button>
+                        <button id="btnSubmit" class="btn blue" ${App.session.role === 'guest' ? 'disabled title="게스트는 제출 불가"' : ''}>✅ 제출</button>
+                    </div>
+                </div>
+                <textarea id="codeEditor" class="code-editor" spellcheck="false">${esc(p.template)}</textarea>
+            </div>
+            <div class="output-wrap">
+                <div class="output-toolbar">실행 결과</div>
+                <pre id="outputArea">코드를 실행하면 결과가 여기에 표시됩니다.</pre>
+            </div>
+            <div class="timer-line" id="timerLine"></div>
         </div>
-        <div class="problem-desc">${mdRender(p.description)}</div>
-        <div class="form-group">
-            <label>입력</label>
-            <textarea id="codeInput" class="input" rows="2">${esc(p.inputEx)}</textarea>
-        </div>
-        <div class="form-group">
-            <label>Python 코드</label>
-            <textarea id="codeEditor" class="textarea code-area" rows="12">${esc(p.templateCode)}</textarea>
-        </div>
-        <div class="btn-row">
-            <button id="btnRun" class="btn">▶ 실행</button>
-            <button id="btnSubmit" class="btn btn-primary" ${state.session.role === 'guest' ? 'disabled' : ''}>✅ 제출</button>
-        </div>
-        <div class="output-box">
-            <div class="output-title">출력</div>
-            <pre id="outputArea" class="output-content"></pre>
-        </div>
-        <div class="timer-display" id="timerDisplay"></div>
     `;
-    $('#btnRun').onclick = () => runCode(false);
-    $('#btnSubmit').onclick = () => submitCode();
-    $('#codeEditor').addEventListener('keydown', e => {
-        if (e.key === 'Tab') { e.preventDefault();
-            const t = e.target; const s = t.selectionStart;
-            t.value = t.value.substring(0, s) + '    ' + t.value.substring(t.selectionEnd);
-            t.selectionStart = t.selectionEnd = s + 4; }
+
+    el('btnResetCode').addEventListener('click', () => {
+        el('codeEditor').value = p.template;
+        el('codeStdin').value = p.inputEx;
+        el('outputArea').textContent = '초기화되었습니다.';
+        el('outputArea').className = '';
     });
+    el('btnRun').addEventListener('click', () => doRun(false));
+    el('btnSubmit').addEventListener('click', () => doRun(true));
+    el('codeEditor').addEventListener('keydown', handleTab);
+    startProblemTimer(p.timeLimit || 0);
 }
 
-let timerInterval = null;
-function startTimer(limit) {
+function handleTab(e) {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const t = e.target;
+    const s = t.selectionStart;
+    t.value = t.value.slice(0, s) + '    ' + t.value.slice(t.selectionEnd);
+    t.selectionStart = t.selectionEnd = s + 4;
+}
+
+// --- 타이머 ---
+function startProblemTimer(limitSec) {
     stopTimer();
-    if (!limit) { $('#timerDisplay').textContent = '시간 제한 없음'; return; }
-    let remaining = limit;
-    $('#timerDisplay').textContent = `남은 시간: ${formatTime(remaining)}`;
-    timerInterval = setInterval(() => {
-        remaining--;
-        if (remaining <= 0) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-            $('#timerDisplay').textContent = '⏰ 시간 초과!';
-            submitCode();
+    const line = el('timerLine');
+    if (!line) return;
+    if (!limitSec) { line.textContent = ''; return; }
+    let rem = limitSec;
+    line.textContent = `⏱ 남은 시간: ${fmtTime(rem)}`;
+    App.timerID = setInterval(() => {
+        rem--;
+        if (rem <= 0) {
+            stopTimer();
+            if (line) line.textContent = '⏰ 시간 초과! 자동 제출됩니다.';
+            doRun(true);
         } else {
-            $('#timerDisplay').textContent = `남은 시간: ${formatTime(remaining)}`;
+            if (line) line.textContent = `⏱ 남은 시간: ${fmtTime(rem)}`;
         }
     }, 1000);
 }
-function stopTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
-
-async function runCode() {
-    const p = state.repo.current;
-    if (!p) return;
-    const code = $('#codeEditor').value;
-    const input = $('#codeInput').value;
-    const timeout = (p.timeLimit || 300) * 1000;
-    $('#outputArea').textContent = '실행 중...';
-    try {
-        const r = await runPython(code, input, timeout);
-        const out = r.stdout.trim() || '(출력 없음)';
-        const err = r.stderr.trim();
-        $('#outputArea').textContent = err ? out + '\n[오류]\n' + err : out;
-        $('#outputArea').className = 'output-content' + (err ? ' error' : ' success');
-    } catch (e) {
-        $('#outputArea').textContent = e.message;
-        $('#outputArea').className = 'output-content error';
-    }
+function stopTimer() {
+    if (App.timerID) { clearInterval(App.timerID); App.timerID = null; }
 }
 
-async function submitCode() {
-    const p = state.repo.current;
-    if (!p) return;
-    if (state.session.role === 'guest') return toast('게스트는 제출할 수 없습니다', 'warning');
-    const code = $('#codeEditor').value;
-    const input = $('#codeInput').value;
-    const timeout = (p.timeLimit || 300) * 1000;
-    stopTimer();
-    $('#outputArea').textContent = '채점 중...';
+// --- 코드 실행 / 제출 ---
+async function doRun(isSubmit) {
+    const p = App.currentProblem;
+    if (!p) return toast('문제를 먼저 선택하세요', 'fail');
+    if (!App.pyodideReady) return toast('Python이 아직 준비되지 않았습니다', 'fail');
+
+    const code = el('codeEditor') ? el('codeEditor').value : '';
+    const stdin = el('codeStdin') ? el('codeStdin').value : '';
+    const out = el('outputArea');
+    if (!out) return;
+
+    const timeoutMs = Math.max(5000, (p.timeLimit || 30) * 1000);
+
+    out.className = '';
+    out.textContent = isSubmit ? '채점 중...' : '실행 중...';
 
     try {
-        // 학생 코드 실행
-        const studentResult = await runPython(code, input, timeout);
-        const studentOut = studentResult.stdout.trim();
+        const studentRes = await runPython(code, stdin, timeoutMs);
+        const studentOut = studentRes.stdout.trim();
+        const studentErr = studentRes.stderr.trim();
 
-        // 정답 코드 실행
-        const answerResult = await runPython(p.answerCode, input, timeout);
-        const answerOut = answerResult.stdout.trim();
-
-        // 비교
-        const correct = studentOut === answerOut;
-        const score = correct ? p.score : 0;
-
-        // 결과 표시
-        if (correct) {
-            $('#outputArea').textContent = `✅ 정답! (+${score}점)\n${studentOut || '(출력 없음)'}`;
-            $('#outputArea').className = 'output-content success';
-            toast('정답입니다!', 'success');
-        } else {
-            $('#outputArea').textContent = `❌ 오답\n\n내 출력:\n${studentOut || '(없음)'}\n\n기대 출력:\n${answerOut || '(없음)'}`;
-            $('#outputArea').className = 'output-content error';
-            toast('오답입니다', 'warning');
+        if (!isSubmit) {
+            out.textContent = studentOut || '(출력 없음)';
+            if (studentErr) out.textContent += '\n[오류]\n' + studentErr;
+            out.className = studentErr ? 'err' : 'ok';
+            return;
         }
 
-        // 기록 저장
-        await saveRecord(p, code, correct, score, studentOut, answerOut);
+        // 제출: 정답 코드 실행
+        const answerRes = await runPython(p.answer, stdin, timeoutMs);
+        const answerOut = answerRes.stdout.trim();
+
+        const correct = studentOut === answerOut;
+
+        if (correct) {
+            out.textContent = `✅ 정답입니다! +${p.score}점\n\n출력:\n${studentOut || '(없음)'}`;
+            out.className = 'ok';
+            toast('정답!', 'ok');
+        } else {
+            out.textContent = `❌ 오답입니다.\n\n내 출력:\n${studentOut || '(없음)'}\n\n기대 출력:\n${answerOut || '(없음)'}`;
+            out.className = 'err';
+            toast('오답', 'fail');
+        }
+
+        stopTimer();
+        await saveRecord(p, code, correct, correct ? p.score : 0, studentOut, answerOut);
 
     } catch (e) {
-        $('#outputArea').textContent = '채점 오류: ' + e.message;
-        $('#outputArea').className = 'output-content error';
+        out.textContent = '오류: ' + e.message;
+        out.className = 'err';
     }
 }
 
-async function saveRecord(problem, code, correct, score, studentOut, answerOut) {
-    const record = {
+// --- 기록 저장 ---
+async function saveRecord(p, code, correct, score, studentOut, answerOut) {
+    const rec = {
         timestamp: new Date().toISOString(),
-        studentId: state.session.userId,
-        studentName: state.session.userName,
-        classId: state.session.classId || '미지정',
-        repo: problem.repo || `${state.repo.owner}/${state.repo.repo}`,
-        branch: problem.branch || state.repo.branch,
-        problem: problem.title,
-        problemPath: problem.path,
+        studentId: App.session.userId || 'guest',
+        studentName: App.session.userName || '게스트',
+        classId: App.session.classId || '미지정',
+        repo: p.repo || `${App.repoInfo.owner}/${App.repoInfo.repo}`,
+        problem: p.title,
+        problemPath: p.path,
         result: correct ? 'correct' : 'wrong',
-        score, maxScore: problem.score, code, studentOut, answerOut,
-        elapsed: 0
+        score, maxScore: p.score,
+        code, studentOut, answerOut
     };
 
-    // 로컬 저장
-    state.records.unshift(record);
-    localStorage.setItem('gitco_records', JSON.stringify(state.records));
+    App.records.unshift(rec);
+    try { localStorage.setItem('gitco_records', JSON.stringify(App.records.slice(0, 500))); } catch {}
 
-    // Apps Script로 전송
-    if (state.config.appsUrl) {
+    if (App.config.appsUrl) {
         try {
-            await fetch(state.config.appsUrl, {
-                method: 'POST', mode: 'no-cors',
+            await fetch(App.config.appsUrl, {
+                method: 'POST',
+                mode: 'no-cors',
                 headers: { 'Content-Type': 'text/plain' },
-                body: JSON.stringify({ action: 'submit', ...record })
+                body: JSON.stringify({ action: 'submit', ...rec })
             });
         } catch {}
     }
 }
 
-// --- 기록 ---
+// --- 기록 렌더링 ---
 function loadRecords() {
-    try { state.records = JSON.parse(localStorage.getItem('gitco_records') || '[]'); } catch { state.records = []; }
+    try { App.records = JSON.parse(localStorage.getItem('gitco_records') || '[]'); } catch { App.records = []; }
     filterRecords();
 }
+
 function filterRecords() {
-    const q = ($('#recordSearch').value || '').toLowerCase();
-    const filtered = state.records.filter(r =>
-        !q || r.studentId?.toLowerCase().includes(q) || r.problem?.toLowerCase().includes(q)
-    );
-    renderRecords(filtered);
+    const q = (el('inRecordSearch') ? el('inRecordSearch').value : '').toLowerCase().trim();
+    const list = q
+        ? App.records.filter(r => (r.studentId + r.studentName + r.problem).toLowerCase().includes(q))
+        : App.records;
+    renderRecords(list);
 }
-function renderRecords(records) {
-    const body = $('#recordsBody');
-    if (!records.length) {
-        body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text3)">기록 없음</td></tr>';
-        $('#recordStats').innerHTML = '<span>0</span> 기록';
+
+function renderRecords(list) {
+    const body = el('recordsBody');
+    const stats = el('recordStats');
+    if (!body) return;
+
+    const total = list.length;
+    const corr = list.filter(r => r.result === 'correct').length;
+    const rate = total ? Math.round(corr / total * 100) : 0;
+    if (stats) stats.innerHTML = `제출 <strong>${total}</strong>회 · 정답 <strong>${corr}</strong>회 · 정답률 <strong>${rate}%</strong>`;
+
+    if (!total) {
+        body.innerHTML = '<tr><td colspan="7" class="empty-td">기록이 없습니다</td></tr>';
         return;
     }
-    const total = records.length;
-    const corrects = records.filter(r => r.result === 'correct').length;
-    const rate = total ? Math.round(corrects/total*100) : 0;
-    $('#recordStats').innerHTML = `<span>${total}</span> 제출 · <span>${corrects}</span> 정답 · <span>${rate}%</span> 정답률`;
-    body.innerHTML = records.slice(0, 200).map((r, i) => `
+    body.innerHTML = list.slice(0, 300).map((r, i) => `
         <tr>
             <td>${new Date(r.timestamp).toLocaleString('ko-KR')}</td>
             <td>${esc(r.studentName || r.studentId)}</td>
             <td>${esc(r.repo || '-')}</td>
             <td>${esc(r.problem)}</td>
-            <td style="color:${r.result === 'correct' ? 'var(--green)' : 'var(--red)'}">${r.result === 'correct' ? '✅ 정답' : '❌ 오답'}</td>
+            <td class="${r.result === 'correct' ? 'res-ok' : 'res-fail'}">${r.result === 'correct' ? '✅ 정답' : '❌ 오답'}</td>
             <td>${r.score}/${r.maxScore}</td>
-            <td>${formatTime(r.elapsed)}</td>
-            <td><button class="btn btn-sm" onclick="viewCode(${i})">보기</button></td>
-        </tr>
-    `).join('');
+            <td><button class="btn" data-ci="${i}">보기</button></td>
+        </tr>`).join('');
+
+    body.querySelectorAll('[data-ci]').forEach(btn => {
+        btn.addEventListener('click', () => viewCode(parseInt(btn.dataset.ci)));
+    });
 }
+
 function viewCode(idx) {
-    const r = state.records[idx];
-    if (!r || !r.code) return toast('코드 없음', 'warning');
-    $('#codeContent').textContent = r.code;
-    show('#codeModal');
-    if (typeof hljs !== 'undefined') hljs.highlightElement($('#codeContent'));
+    const r = App.records[idx];
+    if (!r || !r.code) return toast('코드 없음', 'fail');
+    const modal = el('codeModal');
+    const code = el('modalCode');
+    if (!modal || !code) return;
+    code.textContent = r.code;
+    modal.style.display = 'flex';
+    if (typeof hljs !== 'undefined') hljs.highlightElement(code);
 }
-function closeModal() { hide('#codeModal'); }
+
+function closeModal() {
+    const m = el('codeModal');
+    if (m) m.style.display = 'none';
+}
 
 function exportCSV() {
-    const r = state.records;
-    if (!r.length) return toast('내보낼 기록 없음', 'warning');
-    const h = ['시간', '학생ID', '반', '저장소', '문제', '결과', '점수', '만점', '소요시간'];
-    const rows = r.map(r => [r.timestamp, r.studentId, r.classId, r.repo, r.problem, r.result, r.score, r.maxScore, r.elapsed]);
-    const csv = [h, ...rows].map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-    const b = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    if (!App.records.length) return toast('내보낼 기록이 없습니다', 'fail');
+    const h = ['시간', '학생ID', '학생명', '반', '저장소', '문제', '결과', '점수', '만점'];
+    const rows = App.records.map(r => [r.timestamp, r.studentId, r.studentName, r.classId, r.repo, r.problem, r.result, r.score, r.maxScore]);
+    const csv = [h, ...rows].map(row => row.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(b);
-    a.download = `gitco_records_${new Date().toISOString().slice(0,10)}.csv`;
+    a.href = URL.createObjectURL(blob);
+    a.download = `gitco_records_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast('CSV 다운로드 완료', 'success');
+    toast('CSV 다운로드 완료', 'ok');
 }
 
 // --- 스튜디오 ---
-function updateStudioPreview() {
-    const title = $('#studioTitle').value.trim() || '제목';
-    const score = $('#studioScore').value || 10;
-    const diff = $('#studioDifficulty').value;
-    const desc = $('#studioDescription').value.trim();
-    const inputEx = $('#studioInput').value.trim();
-    const outputEx = $('#studioOutput').value.trim();
-    const answer = $('#studioAnswer').value.trim() || 'print()';
-    const template = $('#studioTemplate').value.trim() || '# 여기에 코드를 작성하세요';
+function updatePreview() {
+    const title = val('stTitle') || '제목 없음';
+    const score = val('stScore') || '10';
+    const diff = val('stDiff') || '보통';
+    const time = val('stTime') || '0';
+    const desc = el('stDesc') ? el('stDesc').value.trim() : '';
+    const inEx = val('stInEx');
+    const outEx = val('stOutEx');
+    const answer = el('stAnswer') ? el('stAnswer').value.trim() : '';
+    const template = el('stTemplate') ? el('stTemplate').value.trim() : '# 여기에 코드를 작성하세요';
 
-    let py = '';
-    py += `# 문제: ${title}\n`;
-    py += `# 점수: ${score}\n`;
-    py += `# 난이도: ${diff}\n`;
-    if (inputEx) py += `# 입력예시: ${inputEx}\n`;
-    if (outputEx) py += `# 출력예시: ${outputEx}\n`;
+    let py = `# 문제: ${title}\n# 점수: ${score}\n# 난이도: ${diff}\n# 시간제한: ${time}\n`;
+    if (inEx) py += `# 입력예시: ${inEx}\n`;
+    if (outEx) py += `# 출력예시: ${outEx}\n`;
     py += `# 설명:\n`;
-    if (desc) desc.split('\n').forEach(l => py += `# ${l}\n`);
-    else py += `# 설명 없음\n`;
-    py += `\n# ===학생코드===\n${template}\n\n# ===정답코드===\n${answer}\n`;
+    (desc || '설명 없음').split('\n').forEach(l => py += `# ${l}\n`);
+    py += `\n# ===학생코드===\n${template || '# 여기에 코드를 작성하세요'}\n\n# ===정답코드===\n${answer || '# 정답 코드'}\n`;
 
-    $('#studioPreview').textContent = py;
-    let md = desc;
-    if (inputEx) md += `\n\n**입력 예시:** \`${inputEx}\``;
-    if (outputEx) md += `\n\n**출력 예시:** \`${outputEx}\``;
-    $('#studioRender').innerHTML = mdRender(md);
+    const prev = el('stPreview');
+    if (prev) prev.textContent = py;
+
+    let md = desc || '';
+    if (inEx) md += `\n\n**입력 예시:** \`${inEx}\``;
+    if (outEx) md += `\n\n**출력 예시:** \`${outEx}\``;
+    const ren = el('stRender');
+    if (ren) ren.innerHTML = mdRender(md);
 }
 
 function downloadPy() {
-    const content = $('#studioPreview').textContent;
-    if (!content || content === '# 미리보기를 눌러주세요') return updateStudioPreview();
-    const title = ($('#studioTitle').value.trim() || 'problem').replace(/[^A-Za-z0-9가-힣_-]/g, '_');
+    updatePreview();
+    const content = el('stPreview') ? el('stPreview').textContent : '';
+    if (!content) return;
+    const title = (val('stTitle') || 'problem').replace(/[^A-Za-z0-9가-힣_-]/g, '_');
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `${title}.py`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast('다운로드 완료', 'success');
+    toast('.py 파일 다운로드 완료', 'ok');
 }
 
-// --- 관리자 (간소화) ---
+// --- 관리자 ---
 async function adminLogin() {
-    const pw = $('#adminPw').value.trim();
-    if (state.config.appsUrl) {
+    const pw = val('inAdminPw');
+    if (!pw) return toast('비밀번호를 입력하세요', 'fail');
+
+    let success = false;
+
+    if (App.config.appsUrl) {
         try {
             const hash = await sha256(pw);
-            const res = await fetch(state.config.appsUrl, {
+            // JSONP로 로그인 시도
+            const res = await new Promise((resolve, reject) => {
+                const cb = `_gitco_cb_${Date.now()}`;
+                const s = document.createElement('script');
+                window[cb] = d => { delete window[cb]; s.remove(); resolve(d); };
+                s.onerror = () => { delete window[cb]; s.remove(); reject(new Error('연결 실패')); };
+                s.src = `${App.config.appsUrl}?action=loginTeacher&data=${encodeURIComponent(JSON.stringify({ passwordHash: hash }))}&callback=${cb}`;
+                document.body.appendChild(s);
+            });
+            success = res && res.success;
+            if (!success) return toast(res.error || '비밀번호 오류', 'fail');
+        } catch (e) {
+            // 오프라인이면 기본 비밀번호로 fallback
+            if (pw !== 'admin') return toast('비밀번호 오류 (오프라인: admin)', 'fail');
+            success = true;
+        }
+    } else {
+        if (pw !== 'admin') return toast('비밀번호 오류 (기본값: admin)', 'fail');
+        success = true;
+    }
+
+    if (success) {
+        App.session = { role: 'teacher', userId: 'teacher', userName: '선생님', classId: '' };
+        updateSessionUI();
+        show('adminPanel');
+        el('btnAdminLogin').disabled = true;
+        toast('관리자 로그인 성공', 'ok');
+    }
+}
+
+async function changeTeacherPw() {
+    const pw = val('inNewPw');
+    if (!pw) return toast('새 비밀번호를 입력하세요', 'fail');
+    const hash = await sha256(pw);
+    if (App.config.appsUrl) {
+        try {
+            await fetch(App.config.appsUrl, {
                 method: 'POST', mode: 'no-cors',
                 headers: { 'Content-Type': 'text/plain' },
-                body: JSON.stringify({ action: 'loginTeacher', passwordHash: hash })
+                body: JSON.stringify({ action: 'changeTeacherPassword', passwordHash: hash })
             });
-            // no-cors라 응답 확인 불가, 일단 성공 가정
         } catch {}
     }
-    if (pw === 'admin') {
-        state.session = { role: 'teacher', userId: 'teacher', userName: '관리자', classId: '' };
-        show('#adminPanel');
-        $('#btnAdminLogin').disabled = true;
-        toast('관리자 로그인 성공', 'success');
-    } else {
-        toast('비밀번호가 틀렸습니다', 'error');
+    toast('비밀번호 변경 완료 (서버 반영까지 잠시 걸릴 수 있습니다)', 'ok');
+    setVal('inNewPw', '');
+}
+
+async function addStudent() {
+    const id = prompt('학번/아이디 입력');
+    if (!id) return;
+    const name = prompt('이름') || '';
+    const cls = prompt('반') || '기본';
+    const pw = prompt('초기 비밀번호') || '';
+    if (!pw) return toast('비밀번호는 필수입니다', 'fail');
+    const hash = await sha256(pw);
+    if (App.config.appsUrl) {
+        try {
+            await fetch(App.config.appsUrl, {
+                method: 'POST', mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: 'addStudent', userId: id, name, classId: cls, passwordHash: hash })
+            });
+        } catch {}
     }
+    toast(`${id} 학생 추가 완료 (서버 반영까지 잠시 걸릴 수 있습니다)`, 'ok');
+}
+
+async function generateAccounts() {
+    const cls = prompt('반 이름', '1학년1반') || '';
+    const prefix = prompt('학번 접두사', '1A') || '';
+    const count = parseInt(prompt('학생 수', '25') || '0');
+    const start = parseInt(prompt('시작 번호', '1') || '1');
+    if (!cls || !prefix || !count) return toast('모든 항목을 입력하세요', 'fail');
+
+    if (App.config.appsUrl) {
+        try {
+            const res = await new Promise((resolve, reject) => {
+                const cb = `_gitco_gen_${Date.now()}`;
+                const s = document.createElement('script');
+                window[cb] = d => { delete window[cb]; s.remove(); resolve(d); };
+                s.onerror = () => { delete window[cb]; s.remove(); reject(new Error('연결 실패')); };
+                const d = encodeURIComponent(JSON.stringify({ classId: cls, prefix, count, startNo: start }));
+                s.src = `${App.config.appsUrl}?action=generateAccounts&data=${d}&callback=${cb}`;
+                document.body.appendChild(s);
+            });
+            if (res && res.accounts) {
+                const txt = res.accounts.map(a => `${a.userId} / ${a.password}`).join('\n');
+                const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `accounts_${cls}.txt`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                toast(`${res.accounts.length}개 계정 생성 완료, txt 파일로 다운로드됨`, 'ok');
+                return;
+            }
+        } catch (e) {
+            toast('연결 실패: ' + e.message, 'fail');
+        }
+    } else {
+        toast('Apps Script URL을 먼저 설정하세요', 'fail');
+    }
+}
+
+// --- 학생 로그인 ---
+async function studentLogin() {
+    const id = val('inStudentId');
+    const pw = val('inStudentPw');
+    const cls = val('inStudentClass') || '미지정';
+    if (!id || !pw) return toast('학생 ID와 비밀번호를 입력하세요', 'fail');
+
+    if (App.config.appsUrl) {
+        try {
+            const hash = await sha256(pw);
+            const res = await new Promise((resolve, reject) => {
+                const cb = `_gitco_login_${Date.now()}`;
+                const s = document.createElement('script');
+                window[cb] = d => { delete window[cb]; s.remove(); resolve(d); };
+                s.onerror = () => { delete window[cb]; s.remove(); reject(new Error('서버 연결 실패')); };
+                const d = encodeURIComponent(JSON.stringify({ userId: id, passwordHash: hash, classId: cls }));
+                s.src = `${App.config.appsUrl}?action=loginStudent&data=${d}&callback=${cb}`;
+                document.body.appendChild(s);
+            });
+            if (res && res.success) {
+                App.session = { role: 'student', userId: res.userId || id, userName: res.name || id, classId: res.classId || cls };
+                updateSessionUI();
+                toast(`${App.session.userName}님, 환영합니다!`, 'ok');
+                return;
+            } else {
+                toast(res?.error || '로그인 실패', 'fail');
+                return;
+            }
+        } catch (e) {
+            toast('서버 연결 실패, 로컬 모드로 진행합니다', 'fail');
+        }
+    }
+
+    // 오프라인 fallback
+    App.session = { role: 'student', userId: id, userName: id, classId: cls };
+    updateSessionUI();
+    toast(`${id}님 (로컬 모드)`, 'ok');
+}
+
+function guestLogin() {
+    App.session = { role: 'guest', userId: `guest_${Date.now().toString(36)}`, userName: '게스트', classId: '미지정' };
+    updateSessionUI();
+    toast('게스트 모드로 시작합니다 (기록은 저장되지 않습니다)', 'fail');
+}
+
+function logout() {
+    App.session = { role: 'guest', userId: '', userName: '게스트', classId: '' };
+    updateSessionUI();
+    toast('로그아웃했습니다', 'ok');
 }
 
 // --- 이벤트 바인딩 ---
-function initEvents() {
-    // 페이지 전환
-    $$('.nav-btn').forEach(btn => {
-        btn.onclick = () => {
-            switchPage(btn.dataset.page);
-            if (btn.dataset.page === 'records') loadRecords();
-        };
+function bindEvents() {
+    // 네비게이션
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => switchPage(btn.dataset.page));
     });
 
-    // 학습
-    $('#btnSearchRepos').onclick = searchRepos;
-    $('#btnLoadDirect').onclick = loadDirect;
-    $('#btnLoadSelected').onclick = loadSelected;
+    // 헤더
+    const logoutBtn = el('btnLogout');
+    if (logoutBtn) logoutBtn.addEventListener('click', logout);
+
+    // 학습 - 저장소
+    const btnSearch = el('btnSearch');
+    const btnLoadDirect = el('btnLoadDirect');
+    const btnLoadSelected = el('btnLoadSelected');
+    if (btnSearch) btnSearch.addEventListener('click', searchRepos);
+    if (btnLoadDirect) btnLoadDirect.addEventListener('click', loadDirect);
+    if (btnLoadSelected) btnLoadSelected.addEventListener('click', loadSelectedRepo);
+
+    // 학습 - 로그인
+    const btnSL = el('btnStudentLogin');
+    const btnG = el('btnGuest');
+    if (btnSL) btnSL.addEventListener('click', studentLogin);
+    if (btnG) btnG.addEventListener('click', guestLogin);
 
     // 기록
-    $('#recordSearch').oninput = filterRecords;
-    $('#btnExportCSV').onclick = exportCSV;
+    const btnExport = el('btnExportCSV');
+    const srch = el('inRecordSearch');
+    if (btnExport) btnExport.addEventListener('click', exportCSV);
+    if (srch) srch.addEventListener('input', filterRecords);
 
-    // 스튜디오 (실시간 미리보기)
-    ['studioTitle','studioScore','studioDifficulty','studioDescription','studioInput','studioOutput','studioAnswer','studioTemplate'].forEach(id => {
-        const el = $('#' + id);
-        if (el) el.addEventListener('input', updateStudioPreview);
+    // 스튜디오
+    ['stTitle','stScore','stDiff','stTime','stDesc','stInEx','stOutEx','stAnswer','stTemplate'].forEach(id => {
+        const e = el(id);
+        if (e) e.addEventListener('input', updatePreview);
     });
-    $('#btnDownloadPy').onclick = downloadPy;
+    const btnDownload = el('btnDownload');
+    if (btnDownload) btnDownload.addEventListener('click', downloadPy);
 
-    // 설정
-    $('#btnSaveConfig').onclick = saveConfig;
+    // 관리
+    const btnSaveCfg = el('btnSaveCfg');
+    const btnAdminLogin = el('btnAdminLogin');
+    const btnAddStudent = el('btnAddStudent');
+    const btnGenAccounts = el('btnGenAccounts');
+    const btnChangePw = el('btnChangePw');
+    if (btnSaveCfg) btnSaveCfg.addEventListener('click', saveConfig);
+    if (btnAdminLogin) btnAdminLogin.addEventListener('click', adminLogin);
+    if (btnAddStudent) btnAddStudent.addEventListener('click', addStudent);
+    if (btnGenAccounts) btnGenAccounts.addEventListener('click', generateAccounts);
+    if (btnChangePw) btnChangePw.addEventListener('click', changeTeacherPw);
 
-    // 관리자
-    $('#btnAdminLogin').onclick = adminLogin;
-
-    // 모달 닫기
-    $('#codeModal').addEventListener('click', e => { if (e.target === $('#codeModal')) closeModal(); });
+    // 모달
+    const btnClose = el('btnCloseModal');
+    const codeModal = el('codeModal');
+    if (btnClose) btnClose.addEventListener('click', closeModal);
+    if (codeModal) codeModal.addEventListener('click', e => { if (e.target === codeModal) closeModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 }
 
-// --- 초기화 ---
-function init() {
+// --- 앱 초기화 ---
+document.addEventListener('DOMContentLoaded', () => {
     loadConfig();
-    initEvents();
-    initPyodide();
+    bindEvents();
+    updateSessionUI();
+    updatePreview();
     loadRecords();
-
-    // 저장된 토큰 복원
-    const savedToken = getToken();
-    if (savedToken) $('#repoToken').value = savedToken;
-
-    // 기본 저장소 자동 입력
-    if (state.config.defaultRepo) {
-        $('#repoDirect').value = state.config.defaultRepo;
-    }
-
-    updateStudioPreview();
-    toast('GitCo가 준비되었습니다', 'success');
-}
-
-document.addEventListener('DOMContentLoaded', init);
+    initPyodide();
+});
