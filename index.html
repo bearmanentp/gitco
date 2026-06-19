@@ -1,543 +1,250 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GitCo - Git-based Coding Study Platform</title>
-
-  <!-- Pyodide -->
-  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
-
-  <!-- Markdown / XSS / Highlight -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/languages/python.min.js"></script>
-
-  <link rel="stylesheet" href="style.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitCo - Git 기반 코딩 학습 플랫폼</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/languages/python.min.js"></script>
 </head>
 <body>
-  <header class="header">
-    <div class="logo">
-      <div class="logo-icon">⚡</div>
-      <span>GitCo</span>
+    <div id="app">
+        <!-- 헤더 -->
+        <header class="header">
+            <div class="logo">⚡ GitCo</div>
+            <nav class="nav">
+                <button class="nav-btn active" data-page="home">🏠 홈</button>
+                <button class="nav-btn" data-page="lms">📚 학습</button>
+                <button class="nav-btn" data-page="studio">✏️ 문제 만들기</button>
+                <button class="nav-btn" data-page="records">📊 기록</button>
+                <button class="nav-btn" data-page="admin">⚙️ 관리</button>
+            </nav>
+            <div class="header-right">
+                <span id="userStatus" class="user-status">게스트</span>
+                <button id="btnLogout" class="btn btn-sm hidden">로그아웃</button>
+            </div>
+        </header>
+
+        <!-- 토스트 메시지 -->
+        <div id="toastContainer" class="toast-container"></div>
+        <div id="loadingOverlay" class="loading-overlay hidden">
+            <div class="spinner"></div>
+            <div id="loadingText">처리 중...</div>
+        </div>
+
+        <!-- 메인 콘텐츠 -->
+        <main>
+            <!-- ===== 홈 ===== -->
+            <section id="page-home" class="page active">
+                <h1>GitCo에 오신 것을 환영합니다</h1>
+                <p>GitHub 저장소의 .py 파일을 문제로 불러와 학습하고, Google Sheet에 기록합니다.</p>
+                <div class="quick-guide">
+                    <h2>시작하기</h2>
+                    <ol>
+                        <li>관리 페이지에서 Google Sheet Apps Script URL 입력</li>
+                        <li>학습 페이지에서 GitHub 저장소 검색/입력</li>
+                        <li>문제 선택 후 코드 작성 및 제출</li>
+                    </ol>
+                </div>
+            </section>
+
+            <!-- ===== 학습 ===== -->
+            <section id="page-lms" class="page">
+                <div class="lms-layout">
+                    <!-- 왼쪽: 저장소 검색 + 문제 목록 -->
+                    <div class="sidebar">
+                        <!-- 저장소 검색 -->
+                        <div class="card">
+                            <h3>GitHub 저장소</h3>
+                            <div class="form-group">
+                                <label>토큰 (비공개 저장소용, 선택)</label>
+                                <input id="repoToken" class="input" type="password" placeholder="ghp_xxxx">
+                            </div>
+                            <div class="form-group">
+                                <label>사용자명 또는 검색어</label>
+                                <input id="repoQuery" class="input" type="text" placeholder="예: octocat, python problems">
+                            </div>
+                            <div class="form-group">
+                                <label>또는 직접 입력 (owner/repo)</label>
+                                <input id="repoDirect" class="input" type="text" placeholder="예: teacher/python-problems">
+                            </div>
+                            <div class="form-group">
+                                <label>문제 폴더</label>
+                                <input id="repoFolder" class="input" type="text" value="problems">
+                            </div>
+                            <div class="form-group">
+                                <label>라이브러리 폴더</label>
+                                <input id="libFolder" class="input" type="text" value="libraries">
+                            </div>
+                            <div class="btn-row">
+                                <button id="btnSearchRepos" class="btn btn-primary">🔍 검색</button>
+                                <button id="btnLoadDirect" class="btn">📂 직접 로드</button>
+                                <button id="btnLoadSelected" class="btn btn-success" disabled>📥 선택 저장소 로드</button>
+                            </div>
+                            <div class="form-group">
+                                <label>검색 결과</label>
+                                <select id="repoSelect" class="select" disabled>
+                                    <option value="">먼저 검색하세요</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 문제 목록 -->
+                        <div class="card">
+                            <h3>문제 목록</h3>
+                            <div id="problemList" class="problem-list empty">
+                                <p class="empty-text">저장소를 불러오면 문제가 표시됩니다.</p>
+                            </div>
+                            <div id="problemCount" class="small-text"></div>
+                        </div>
+                    </div>
+
+                    <!-- 오른쪽: 문제 상세 + 코드 에디터 -->
+                    <div class="content">
+                        <div id="detailArea" class="card">
+                            <div class="empty-state">
+                                <h2>문제를 선택하세요</h2>
+                                <p>왼쪽에서 문제를 선택하면 여기에 표시됩니다.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== 문제 만들기 ===== -->
+            <section id="page-studio" class="page">
+                <div class="studio-layout">
+                    <div class="card">
+                        <h3>문제 정보</h3>
+                        <div class="form-group">
+                            <label>제목</label>
+                            <input id="studioTitle" class="input" placeholder="예: 두 수의 합">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label>점수</label>
+                                <input id="studioScore" class="input" type="number" value="10">
+                            </div>
+                            <div class="form-group half">
+                                <label>난이도</label>
+                                <select id="studioDifficulty" class="select">
+                                    <option value="쉬움">쉬움</option>
+                                    <option value="보통" selected>보통</option>
+                                    <option value="어려움">어려움</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>설명 (Markdown, 이미지: [이미지: URL])</label>
+                            <textarea id="studioDescription" class="textarea" rows="5"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label>입력 예시</label>
+                                <input id="studioInput" class="input">
+                            </div>
+                            <div class="form-group half">
+                                <label>출력 예시</label>
+                                <input id="studioOutput" class="input">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>정답 코드</label>
+                            <textarea id="studioAnswer" class="textarea code-area" rows="6"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>학생 템플릿</label>
+                            <textarea id="studioTemplate" class="textarea code-area" rows="6"># 여기에 코드를 작성하세요</textarea>
+                        </div>
+                        <button id="btnDownloadPy" class="btn btn-primary">📥 .py 다운로드</button>
+                    </div>
+                    <div class="card">
+                        <h3>미리보기</h3>
+                        <pre id="studioPreview" class="preview-box"></pre>
+                        <div id="studioRender" class="markdown-box"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== 기록 ===== -->
+            <section id="page-records" class="page">
+                <div class="card">
+                    <h3>📊 학습 기록</h3>
+                    <div class="form-group">
+                        <label>검색 (학생 ID, 문제명)</label>
+                        <input id="recordSearch" class="input" oninput="filterRecords()">
+                    </div>
+                    <div id="recordStats" class="stats"></div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>시간</th>
+                                    <th>학생</th>
+                                    <th>저장소</th>
+                                    <th>문제</th>
+                                    <th>결과</th>
+                                    <th>점수</th>
+                                    <th>시간</th>
+                                    <th>코드</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recordsBody"></tbody>
+                        </table>
+                    </div>
+                    <button id="btnExportCSV" class="btn">📥 CSV 내보내기</button>
+                </div>
+            </section>
+
+            <!-- ===== 관리 ===== -->
+            <section id="page-admin" class="page">
+                <div class="card">
+                    <h3>설정</h3>
+                    <div class="form-group">
+                        <label>Google Apps Script URL</label>
+                        <input id="cfgAppsUrl" class="input" placeholder="https://script.google.com/macros/s/.../exec">
+                    </div>
+                    <div class="form-group">
+                        <label>기본 저장소</label>
+                        <input id="cfgDefaultRepo" class="input" placeholder="owner/repo">
+                    </div>
+                    <button id="btnSaveConfig" class="btn btn-primary">💾 설정 저장</button>
+                </div>
+                <div class="card">
+                    <h3>🔐 관리자</h3>
+                    <div class="form-group">
+                        <label>비밀번호</label>
+                        <input id="adminPw" class="input" type="password">
+                    </div>
+                    <button id="btnAdminLogin" class="btn btn-primary">로그인</button>
+                    <div id="adminPanel" class="hidden">
+                        <h4>학생 목록</h4>
+                        <div id="studentTable"></div>
+                        <div class="btn-row">
+                            <button id="btnAddStudent" class="btn btn-success">+ 추가</button>
+                            <button id="btnGenerateAccounts" class="btn">📋 일괄 생성</button>
+                            <button id="btnChangePw" class="btn">🔑 비밀번호 변경</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 코드 보기 모달 -->
+            <div id="codeModal" class="modal-overlay hidden">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>제출 코드</h3>
+                        <button class="btn" onclick="closeModal()">✕</button>
+                    </div>
+                    <pre><code id="codeContent" class="language-python"></code></pre>
+                </div>
+            </div>
+        </main>
     </div>
-
-    <nav class="header-nav">
-      <button class="nav-btn active" data-page="home">홈</button>
-      <button class="nav-btn" data-page="lms">학습</button>
-      <button class="nav-btn" data-page="studio">출제</button>
-      <button class="nav-btn" data-page="records">기록</button>
-      <button class="nav-btn" data-page="admin">관리</button>
-    </nav>
-
-    <div class="header-actions">
-      <div class="pyodide-status">
-        <div class="status-dot" id="pyodideStatusDot"></div>
-        <span id="pyodideStatusText">Python 로딩중...</span>
-      </div>
-
-      <div id="userBadge" class="user-badge hidden">
-        <div class="avatar" id="userAvatar">?</div>
-        <span id="userName">Guest</span>
-      </div>
-
-      <button class="btn btn-sm" id="btnLogout">로그아웃</button>
-    </div>
-  </header>
-
-  <div class="toast-container" id="toastContainer"></div>
-  <div class="loading-overlay" id="loadingOverlay">
-    <div class="spinner"></div>
-    <div class="loading-text" id="loadingText">처리 중...</div>
-  </div>
-
-  <main class="main-container">
-    <!-- HOME -->
-    <section class="page active" id="page-home">
-      <div class="card hero">
-        <h1>GitCo</h1>
-        <p class="subtitle">GitHub를 문제 저장소로, Google Sheet를 기록 저장소로 쓰는 서버리스 코딩 플랫폼</p>
-
-        <div class="stats-grid">
-          <div class="stat-card blue">
-            <div class="value">0원</div>
-            <div class="label">서버 비용</div>
-          </div>
-          <div class="stat-card green">
-            <div class="value">GitHub</div>
-            <div class="label">문제 DB</div>
-          </div>
-          <div class="stat-card orange">
-            <div class="value">Sheets</div>
-            <div class="label">기록 DB</div>
-          </div>
-          <div class="stat-card purple">
-            <div class="value">Pyodide</div>
-            <div class="label">브라우저 실행</div>
-          </div>
-        </div>
-
-        <div class="feature-grid">
-          <div class="card">
-            <h3>자유 모드</h3>
-            <p>사용자가 GitHub 사용자명 / 저장소명 / URL을 직접 넣어 어떤 공개·비공개 레포도 문제은행처럼 사용할 수 있습니다.</p>
-          </div>
-          <div class="card">
-            <h3>기록 분리</h3>
-            <p>학생은 본인 기록만 보고, 선생님은 전체/반별 기록을 관리합니다.</p>
-          </div>
-          <div class="card">
-            <h3>라이브러리 지원</h3>
-            <p>repo 안의 <code>libraries</code> 폴더를 자동 로드하여 Pyodide에서 지원이 애매한 순수 파이썬 라이브러리를 불러올 수 있습니다.</p>
-          </div>
-        </div>
-
-        <div class="quick-start">
-          <h2>빠른 시작</h2>
-          <ol>
-            <li>Google Sheet에 Apps Script를 붙여넣고 웹앱으로 배포</li>
-            <li>GitHub에 문제 .py 파일 업로드</li>
-            <li>학습 탭에서 repo 검색/선택 후 문제 불러오기</li>
-          </ol>
-        </div>
-      </div>
-    </section>
-
-    <!-- LMS -->
-    <section class="page" id="page-lms">
-      <div class="page-grid">
-        <aside class="sidebar">
-          <div class="card">
-            <h2>로그인</h2>
-
-            <div class="form-group">
-              <label>학생 ID</label>
-              <input id="studentId" class="input" type="text" placeholder="예: 20240001 / 홍길동" />
-            </div>
-
-            <div class="form-group">
-              <label>비밀번호</label>
-              <input id="studentPw" class="input" type="password" placeholder="비밀번호" />
-            </div>
-
-            <div class="form-group">
-              <label>반 (선택)</label>
-              <input id="studentClass" class="input" type="text" placeholder="예: 3학년 2반" />
-            </div>
-
-            <div class="btn-row">
-              <button class="btn btn-primary" id="btnStudentLogin">학생 로그인</button>
-              <button class="btn" id="btnGuestLogin">게스트</button>
-            </div>
-
-            <p class="small-note">반은 선택 사항입니다. 안 넣어도 됩니다.</p>
-          </div>
-
-          <div class="card">
-            <h2>GitHub 저장소 브라우저</h2>
-
-            <div class="form-group">
-              <label>GitHub 사용자명</label>
-              <input id="repoUser" class="input" type="text" placeholder="예: octocat" />
-            </div>
-
-            <div class="form-group">
-              <label>저장소 검색어</label>
-              <input id="repoQuery" class="input" type="text" placeholder="예: python, school, coding" />
-            </div>
-
-            <div class="form-group">
-              <label>직접 입력 (owner/repo 또는 URL)</label>
-              <input id="repoDirect" class="input" type="text" placeholder="teacher/python-problems 또는 https://github.com/teacher/python-problems" />
-            </div>
-
-            <div class="form-group">
-              <label>GitHub 토큰 (private repo용, 선택)</label>
-              <input id="repoToken" class="input" type="password" placeholder="ghp_xxx" />
-            </div>
-
-            <div class="form-group">
-              <label>문제 폴더</label>
-              <input id="repoFolder" class="input" type="text" value="problems" />
-            </div>
-
-            <div class="form-group">
-              <label>브랜치</label>
-              <input id="repoBranch" class="input" type="text" placeholder="main / master / 비우면 자동" />
-            </div>
-
-            <div class="btn-row wrap">
-              <button class="btn btn-primary" id="btnSearchRepos">저장소 검색</button>
-              <button class="btn" id="btnLoadDirectRepo">직접 로드</button>
-              <button class="btn btn-success" id="btnLoadSelectedRepo">선택 저장소 불러오기</button>
-            </div>
-
-            <div class="form-group">
-              <label>검색 결과 / 선택 저장소</label>
-              <select id="repoSelect" class="select"></select>
-            </div>
-          </div>
-        </aside>
-
-        <section class="content">
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">문제 목록</span>
-              <button class="btn btn-sm" id="btnRefreshProblems">새로고침</button>
-            </div>
-            <div id="problemList" class="problem-list">
-              <div class="empty-state">
-                <div class="icon">📭</div>
-                <div class="text">저장소를 불러오면 문제가 표시됩니다</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card" id="problemDetailCard">
-            <div class="empty-state">
-              <div class="icon">👈</div>
-              <div class="text">왼쪽에서 문제를 선택하세요</div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </section>
-
-    <!-- STUDIO -->
-    <section class="page" id="page-studio">
-      <div class="studio-layout">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">출제 설정</span>
-            <button class="btn btn-sm btn-primary" id="btnSaveSettings">설정 저장</button>
-          </div>
-
-          <div class="form-group">
-            <label>GitHub 토큰</label>
-            <input id="cfgGithubToken" class="input" type="password" placeholder="ghp_xxx" />
-          </div>
-
-          <div class="form-group">
-            <label>기본 문제 Repo</label>
-            <input id="cfgDefaultRepo" class="input" type="text" placeholder="owner/repo" />
-          </div>
-
-          <div class="form-group">
-            <label>기본 브랜치</label>
-            <input id="cfgDefaultBranch" class="input" type="text" placeholder="main" />
-          </div>
-
-          <div class="form-group">
-            <label>기본 문제 폴더</label>
-            <input id="cfgDefaultFolder" class="input" type="text" value="problems" />
-          </div>
-
-          <div class="form-group">
-            <label>libraries 폴더 이름</label>
-            <input id="cfgLibrariesFolder" class="input" type="text" value="libraries" />
-          </div>
-
-          <div class="form-group">
-            <label>백업 Repo (선택)</label>
-            <input id="cfgBackupRepo" class="input" type="text" placeholder="student-backups/repo" />
-          </div>
-
-          <div class="form-group">
-            <label>백업 브랜치</label>
-            <input id="cfgBackupBranch" class="input" type="text" value="main" />
-          </div>
-
-          <div class="form-group">
-            <label>Apps Script URL</label>
-            <input id="cfgAppsUrl" class="input" type="url" placeholder="https://script.google.com/macros/s/.../exec" />
-          </div>
-
-          <div class="form-group">
-            <label>Google Sheet ID (참고용)</label>
-            <input id="cfgSheetId" class="input" type="text" placeholder="옵션" />
-          </div>
-
-          <div class="form-group">
-            <label>기본 시간 제한 (초)</label>
-            <input id="cfgDefaultTimeLimit" class="input" type="number" value="300" />
-          </div>
-
-          <div class="form-group">
-            <label>채점 방식</label>
-            <select id="cfgGradingMode" class="select">
-              <option value="exact">정확히 일치</option>
-              <option value="strip" selected>공백 무시</option>
-              <option value="contains">포함 여부</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">문제 생성기</span>
-            <div class="btn-row">
-              <button class="btn btn-sm" id="btnPreviewProblem">미리보기</button>
-              <button class="btn btn-sm btn-primary" id="btnDownloadPy">.py 다운로드</button>
-              <button class="btn btn-sm btn-success" id="btnUploadGitHub">GitHub 업로드</button>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>문제 제목</label>
-            <input id="studioTitle" class="input" type="text" placeholder="예: 두 수의 합" />
-          </div>
-
-          <div class="grid-2">
-            <div class="form-group">
-              <label>점수</label>
-              <input id="studioScore" class="input" type="number" value="10" />
-            </div>
-            <div class="form-group">
-              <label>난이도</label>
-              <select id="studioDifficulty" class="select">
-                <option value="쉬움">쉬움</option>
-                <option value="보통" selected>보통</option>
-                <option value="어려움">어려움</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div class="form-group">
-              <label>문제별 시간 제한 (초)</label>
-              <input id="studioTimeLimit" class="input" type="number" value="300" />
-            </div>
-            <div class="form-group">
-              <label>파일명</label>
-              <input id="studioFilename" class="input" type="text" placeholder="problem01.py" />
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div class="form-group">
-              <label>공개 시작 (ISO / 선택)</label>
-              <input id="studioAvailableFrom" class="input" type="text" placeholder="2026-01-01T09:00:00" />
-            </div>
-            <div class="form-group">
-              <label>공개 종료 (ISO / 선택)</label>
-              <input id="studioAvailableTo" class="input" type="text" placeholder="2026-01-01T10:00:00" />
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>문제 설명 (Markdown 지원, [이미지: URL] 가능)</label>
-            <textarea id="studioDescription" class="textarea" rows="6"></textarea>
-          </div>
-
-          <div class="grid-2">
-            <div class="form-group">
-              <label>입력 예시</label>
-              <input id="studioInputExample" class="input" type="text" />
-            </div>
-            <div class="form-group">
-              <label>출력 예시</label>
-              <input id="studioOutputExample" class="input" type="text" />
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>정답 코드</label>
-            <textarea id="studioAnswerCode" class="textarea code-area-input" rows="8" placeholder="print('Hello')"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label>학생 템플릿</label>
-            <textarea id="studioTemplateCode" class="textarea code-area-input" rows="8" placeholder="# 여기에 코드를 작성하세요"></textarea>
-          </div>
-
-          <div class="grid-2">
-            <div class="form-group">
-              <label>저장 폴더</label>
-              <input id="studioFolder" class="input" type="text" value="problems" />
-            </div>
-            <div class="form-group">
-              <label>라이브러리 목록(선택)</label>
-              <input id="studioLibraryList" class="input" type="text" placeholder="utils, mylib" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="studio-preview-grid">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">.py 미리보기</span>
-          </div>
-          <pre class="preview-box" id="studioPreviewCode"></pre>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Markdown 미리보기</span>
-          </div>
-          <div class="markdown-preview" id="studioPreviewMarkdown"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- RECORDS -->
-    <section class="page" id="page-records">
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">기록 대시보드</span>
-          <div class="btn-row wrap">
-            <button class="btn btn-sm" id="btnLoadRecords">불러오기</button>
-            <button class="btn btn-sm" id="btnExportCSV">CSV 내보내기</button>
-          </div>
-        </div>
-
-        <div class="stats-grid">
-          <div class="stat-card blue">
-            <div class="value" id="statStudents">0</div>
-            <div class="label">학생 수</div>
-          </div>
-          <div class="stat-card green">
-            <div class="value" id="statSubmissions">0</div>
-            <div class="label">제출 수</div>
-          </div>
-          <div class="stat-card orange">
-            <div class="value" id="statCorrect">0</div>
-            <div class="label">정답 수</div>
-          </div>
-          <div class="stat-card purple">
-            <div class="value" id="statRate">0%</div>
-            <div class="label">정답률</div>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div id="recordControlsStudent">
-            <p class="small-note">학생은 본인 기록만 보입니다.</p>
-          </div>
-
-          <div id="recordControlsTeacher" class="hidden">
-            <div class="grid-2">
-              <div class="form-group">
-                <label>Scope</label>
-                <select id="recordScope" class="select">
-                  <option value="all">전체</option>
-                  <option value="class">반별</option>
-                  <option value="mine">내 기록</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>반 선택</label>
-                <select id="recordClassFilter" class="select"></select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>검색</label>
-          <input id="recordSearch" class="input" type="text" placeholder="학생 ID / 문제명 검색" />
-        </div>
-
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>시간</th>
-                <th>학생 ID</th>
-                <th>반</th>
-                <th>Repo</th>
-                <th>문제</th>
-                <th>결과</th>
-                <th>점수</th>
-                <th>소요시간</th>
-                <th>코드</th>
-              </tr>
-            </thead>
-            <tbody id="recordsBody">
-              <tr>
-                <td colspan="9" class="empty-cell">기록이 없습니다</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- ADMIN -->
-    <section class="page" id="page-admin">
-      <div class="card" id="teacherLoginCard">
-        <div class="card-header">
-          <span class="card-title">선생님 로그인</span>
-        </div>
-
-        <div class="form-group">
-          <label>관리 비밀번호</label>
-          <input id="teacherPw" class="input" type="password" placeholder="비밀번호" />
-        </div>
-
-        <button class="btn btn-primary" id="btnTeacherLogin">로그인</button>
-        <p class="small-note">기본값은 초기 설정 후 변경하세요.</p>
-      </div>
-
-      <div class="admin-panel hidden" id="adminPanel">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">학생 관리</span>
-            <div class="btn-row">
-              <button class="btn btn-sm" id="btnRefreshStudents">새로고침</button>
-              <button class="btn btn-sm btn-success" id="btnAddStudent">학생 추가</button>
-              <button class="btn btn-sm btn-primary" id="btnGenerateAccounts">계정 생성</button>
-            </div>
-          </div>
-
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>학번</th>
-                  <th>이름</th>
-                  <th>반</th>
-                  <th>비밀번호</th>
-                  <th>삭제</th>
-                </tr>
-              </thead>
-              <tbody id="studentTable">
-                <tr>
-                  <td colspan="5" class="empty-cell">학생이 없습니다</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">선생님 설정</span>
-          </div>
-
-          <div class="form-group">
-            <label>새 선생님 비밀번호</label>
-            <input id="teacherNewPw" class="input" type="password" placeholder="새 비밀번호" />
-          </div>
-
-          <button class="btn btn-primary" id="btnChangeTeacherPw">비밀번호 변경</button>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <!-- CODE VIEW MODAL -->
-  <div class="modal-overlay" id="codeViewModal">
-    <div class="modal">
-      <div class="modal-title">
-        제출 코드 보기
-        <button class="modal-close" id="btnCloseCodeView">&times;</button>
-      </div>
-      <pre class="code-view"><code id="codeViewContent" class="language-python"></code></pre>
-    </div>
-  </div>
-
-  <script src="app.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
